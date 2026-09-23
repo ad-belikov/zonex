@@ -1,0 +1,48 @@
+# This file configures the analyzer, which statically analyzes Dart code to
+# check for errors, warnings, and lints.
+#
+# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
+# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
+# invoked from the command line by running `flutter analyze`.
+
+# The following line activates a set of recommended lints for Flutter apps,
+# packages, and plugins designed to encourage good coding practices.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  errors:
+    # Превращаем критические предупреждения в ошибки компиляции
+    missing_required_param: error
+    missing_return: error
+    todo: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+
+linter:
+  rules:
+    # --- Чистота кода и архитектура ---
+    - always_declare_return_types # Всегда указывать возвращаемый тип у функций
+    - avoid_void_async # void-функции не должны быть async (используйте Future<void>)
+    - unawaited_futures # Требует await или unawaited() для асинхронных вызовов
+    - prefer_final_locals # Локальные переменные должны быть final, если они не меняются
+    - require_trailing_commas # Обязательные запятые в конце аргументов (для идеального форматирования)
+    
+    - avoid_redundant_argument_values # не забивать код дефолтными аргументами виджетов
+    - prefer_relative_imports # жестко зафиксировать один стиль
+    
+    # --- Специфика Flutter & BLoC ---
+    - avoid_print # Запрет на print() (используйте log() или debugPrint)
+    - prefer_const_constructors # Требует const для виджетов, где это возможно (экономит RAM)
+    - prefer_const_declarations # Const для неизменяемых переменных
+    - use_build_context_synchronously # Запрещает использовать BuildContext после await (критично для Supabase/SharedPreferences запросов)
+    
+    # --- Избавление от лишнего кода ---
+    - avoid_unused_constructor_parameters # Удаление неиспользуемых параметров конструктора
+    - cancel_subscriptions # Обязательное закрытие StreamSubscription (защита от утечек памяти в BLoC)
+    - close_sinks # Обязательное закрытие Sink/Controllers

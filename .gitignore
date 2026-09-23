@@ -1,0 +1,173 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+# .vscode/
+
+# ==============================================================================
+# 1. FLUTTER & DART (Базовые настройки)
+# ==============================================================================
+# Артефакты сборки и кэш Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+
+# Файлы конфигурации веб-сборки (если появятся в будущем)
+lib/generated_plugin_registrant.dart
+
+# Символические ссылки на пакеты
+images/dev_menu/
+ephemeral/
+app.*.symbols
+
+# Сгенерированный код (Freezed, BuiltValue и т.д.)
+# Раскомментируйте, если хотите скрыть файлы .g.dart от Git (обычно их коммитят)
+*.g.dart
+*.freezed.dart
+
+# Obfuscation related
+app.*.map.json
+
+# ==============================================================================
+# 2. SUPABASE & СЕКРЕТЫ (Безопасность)
+# ==============================================================================
+# Локальные переменные окружения с ключами Supabase URL и Anon Key
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+google-services.json
+GoogleService-Info.plist
+
+# Локальная конфигурация Supabase CLI (если используется для локальной разработки)
+supabase/.temp/
+supabase/functions/.env
+
+# ==============================================================================
+# 3. IOS, WATCHOS & MACOS (Apple экосистема)
+# ==============================================================================
+# Пользовательские настройки Xcode
+*.mode1v3
+*.mode2v3
+*.storyboardc
+*.moved-aside
+*.pbxuser
+*.perspectivev3
+!default.pbxuser
+!default.mode1v3
+!default.mode2v3
+!default.perspectivev3
+
+# Локальные файлы сборки Xcode и кэш CocoaPods
+**/ios/.appframeworkdir/
+**/ios/.symlinks/
+**/macos/.appframeworkdir/
+**/macos/.symlinks/
+**/watchos/.symlinks/       # Если watchOS вынесена в отдельную папку
+**/watchos/.appframeworkdir/
+
+Pods/
+Makefile
+Podfile.lock
+
+# Специфичные для macOS файлы системы
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Файлы схемы и состояния Xcode (скрываем личные, оставляем общие)
+xcuserdata/
+
+# Секреты и сертификаты (никогда не коммитить!)
+*.ProvisionProfile
+*.p14
+*.p12
+*.p7b
+*.mobileprovision
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/macos/Flutter/Ephemereal/
+**/macos/Flutter/Generated.xcconfig
+**/macos/Flutter/flutter_export_environment.sh
+
+# ==============================================================================
+# 4. ANDROID
+# ==============================================================================
+# Локальные файлы Gradle и пути к SDK
+.gradle/
+local.properties
+**/android/key.properties
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Файлы сборки конкретных модулей
+**/android/app/release/
+**/android/app/debug/
+
+# Кэш Gradle
+.navigation/
+
+# ==============================================================================
+# 5. WINDOWS
+# ==============================================================================
+# Специфичные файлы компилятора и сборки Visual Studio / CMake
+**/windows/flutter/ephemeral/
+**/windows/CMakeLists.txt.user
+x64/
+x86/
+*.exe
+*.dll
+*.pdb
+*.msi
+
+# ==============================================================================
+# 6. IDE & РЕДАКТОРЫ (VS Code, Android Studio, IntelliJ)
+# ==============================================================================
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Visual Studio Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json       # Оставляем шаблоны запуска, если они общие для команды
+
+# Другие инструменты
+.history/
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Widget Preview related
+.widget_preview/
