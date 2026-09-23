@@ -46,3 +46,6 @@ linter:
     - avoid_unused_constructor_parameters # Удаление неиспользуемых параметров конструктора
     - cancel_subscriptions # Обязательное закрытие StreamSubscription (защита от утечек памяти в BLoC)
     - close_sinks # Обязательное закрытие Sink/Controllers
+
+    - avoid_types_on_closure_parameters
+    - valid_regexps

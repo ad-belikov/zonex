@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Приложению ZonEx требуется постоянный доступ к Bluetooth для поиска и подключения к спортивным тренажерам.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Приложению ZonEx требуется доступ к Bluetooth для обмена данными с тренажерами.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Приложению ZonEx требуется доступ к геолокации для корректной работы поиска BLE устройств.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

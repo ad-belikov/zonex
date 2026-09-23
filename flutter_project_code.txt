@@ -1,0 +1,1335 @@
+
+
+========================================
+FILE: .\analysis_options.yaml
+========================================
+
+# This file configures the analyzer, which statically analyzes Dart code to
+# check for errors, warnings, and lints.
+#
+# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
+# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
+# invoked from the command line by running `flutter analyze`.
+
+# The following line activates a set of recommended lints for Flutter apps,
+# packages, and plugins designed to encourage good coding practices.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  errors:
+    # Превращаем критические предупреждения в ошибки компиляции
+    missing_required_param: error
+    missing_return: error
+    todo: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+
+linter:
+  rules:
+    # --- Чистота кода и архитектура ---
+    - always_declare_return_types # Всегда указывать возвращаемый тип у функций
+    - avoid_void_async # void-функции не должны быть async (используйте Future<void>)
+    - unawaited_futures # Требует await или unawaited() для асинхронных вызовов
+    - prefer_final_locals # Локальные переменные должны быть final, если они не меняются
+    - require_trailing_commas # Обязательные запятые в конце аргументов (для идеального форматирования)
+    
+    - avoid_redundant_argument_values # не забивать код дефолтными аргументами виджетов
+    - prefer_relative_imports # жестко зафиксировать один стиль
+    
+    # --- Специфика Flutter & BLoC ---
+    - avoid_print # Запрет на print() (используйте log() или debugPrint)
+    - prefer_const_constructors # Требует const для виджетов, где это возможно (экономит RAM)
+    - prefer_const_declarations # Const для неизменяемых переменных
+    - use_build_context_synchronously # Запрещает использовать BuildContext после await (критично для Supabase/SharedPreferences запросов)
+    
+    # --- Избавление от лишнего кода ---
+    - avoid_unused_constructor_parameters # Удаление неиспользуемых параметров конструктора
+    - cancel_subscriptions # Обязательное закрытие StreamSubscription (защита от утечек памяти в BLoC)
+    - close_sinks # Обязательное закрытие Sink/Controllers
+
+
+========================================
+FILE: .\pubspec.yaml
+========================================
+
+name: zonex_app
+description: "A new Flutter project."
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.8
+  flutter_bloc: ^9.1.1
+  shared_preferences: ^2.5.5
+  flutter_blue_plus: ^2.3.13
+  intl: ^0.20.3
+  sqflite: ^2.4.4
+  health: ^13.3.2
+  flutter_tts: ^4.2.5
+  path: ^1.9.1
+  just_audio: ^0.10.6
+  get_it: ^9.3.0
+  wakelock_plus: ^1.8.0
+  permission_handler: ^13.0.2
+  typed_data: ^1.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+
+# The following section is specific to Flutter packages.
+flutter:
+
+  uses-material-design: true
+
+  assets:
+    - assets/audio/start.mp3
+    - assets/audio/pause.mp3
+    - assets/audio/resume.mp3
+    - assets/audio/stop.mp3
+
+
+
+========================================
+FILE: .\.vscode\launch.json
+========================================
+
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Flutter: Debug",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart"
+        },
+        {
+            "name": "Flutter Release",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release",
+        }
+    ]
+}
+/*
+       {
+            "name": "Flutter Dev",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "toolArgs": [
+                "--dart-define",
+                "API_BASE_URL=https://example.com",
+                "--dart-define",
+                "APP_MODE=development"
+            ]
+            "args": [
+              "--flavor", "development",
+              "--dart-define", "APP_TITLE=DevApp"
+            ]
+        },
+*/
+
+========================================
+FILE: .\.vscode\settings.json
+========================================
+
+{
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll": "explicit",
+        "source.organizeImports": "explicit"
+    },
+    "dart.maxLineLength": 80,
+    "dart.lineLength": 80,
+    "dart.previewCommitCharacters": true,
+    "dart.checkForSdkUpdates": true,
+    "editor.suggestSelection": "first",
+    "editor.wordWrap": "off",
+    "dart.previewFlutterUiGuides": true,
+    "dart.openDevTools": "never",
+    "dart.warnWhenEditingFilesOutsideWorkspace": false,
+    "files.watcherExclude": {
+        "**/.git/objects/**": true,
+        "**/.dart_tool/**": true,
+        "**/.pub-cache/**": true,
+        "**/build/**": true
+    },
+    "accessibility.signalOptions.volume": 0
+}
+
+========================================
+FILE: .\.vscode\tasks.json
+========================================
+
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "flutter: analyze",
+            "type": "shell",
+            "command": "flutter",
+            "group": "build",
+            "runOptions": {
+                "instanceLimit": 1,
+                "reevaluateOnRerun": false
+            },
+            "args": [
+                "analyze"
+            ],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "flutter: pub get",
+            "type": "shell",
+            "command": "flutter",
+            "group": "build",
+            "runOptions": {
+                "instanceLimit": 1,
+                "reevaluateOnRerun": false
+            },
+            "args": [
+                "pub",
+                "get"
+            ],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "flutter: clean",
+            "type": "shell",
+            "command": "flutter",
+            "group": "build",
+            "runOptions": {
+                "instanceLimit": 1,
+                "reevaluateOnRerun": false
+            },
+            "args": [
+                "clean"
+            ],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "flutter: build_runner",
+            "type": "shell",
+            "command": "flutter",
+            "group": "build",
+            "runOptions": {
+                "instanceLimit": 1,
+                "reevaluateOnRerun": false
+            },
+            "args": [
+                "pub",
+                "run",
+                "build_runner",
+                "build",
+                "--delete-conflicting-outputs"
+            ],
+            "presentation": {
+                "echo": true,
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "flutter: format",
+            "type": "shell",
+            "command": "flutter",
+            "group": "build",
+            "runOptions": {
+                "instanceLimit": 1,
+                "reevaluateOnRerun": false
+            },
+            "args": [
+                "format",
+                "lib"
+            ],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "flutter: build test apk",
+            "type": "shell",
+            "command": "flutter",
+            "group": "build",
+            "runOptions": {
+                "instanceLimit": 1,
+                "reevaluateOnRerun": false
+            },
+            "args": [
+                "build",
+                "apk",
+            ],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "flutter: build dev apk",
+            "type": "shell",
+            "command": "flutter",
+            "group": "build",
+            "runOptions": {
+                "instanceLimit": 1,
+                "reevaluateOnRerun": false
+            },
+            "args": [
+                "build",
+                "apk",
+            ],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "flutter: build prod apk",
+            "type": "shell",
+            "command": "flutter",
+            "group": "build",
+            "runOptions": {
+                "instanceLimit": 1,
+                "reevaluateOnRerun": false
+            },
+            "args": [
+                "build",
+                "apk",
+            ],
+            "presentation": {
+                "echo": true,
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+    ]
+}
+
+========================================
+FILE: .\lib\main.dart
+========================================
+
+import 'package:flutter/material.dart';
+
+import 'app/app.dart';
+import 'core/di/injection.dart';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  setupDependencies();
+  runApp(const ZonExApp());
+}
+
+
+========================================
+FILE: .\lib\app\app.dart
+========================================
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../core/ble_service/ble_service.dart';
+import '../core/di/injection.dart';
+import '../core/theme/app_theme.dart';
+import '../core/theme/cubit/theme_cubit.dart';
+import '../features/navigation/ui/main_screen.dart';
+import '../features/shared/ble_connection_bloc/ble_connection_bloc.dart';
+
+class ZonExApp extends StatelessWidget {
+  const ZonExApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider(create: (context) => ThemeCubit()),
+        BlocProvider(
+          create: (context) => BleConnectionBloc(getIt<BleService>()),
+        ),
+      ],
+      child: BlocBuilder<ThemeCubit, ThemeMode>(
+        builder: (context, themeMode) {
+          return MaterialApp(
+            title: 'ZonEx',
+            debugShowCheckedModeBanner: false,
+            themeMode: themeMode,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            home: const MainScreen(),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+========================================
+FILE: .\lib\core\ble_parsers\ble_parser.dart
+========================================
+
+enum EquipmentType { rower, treadmill, bike, stepper, unknown }
+
+abstract class BleParser {
+  EquipmentType get type;
+  Map<String, dynamic> parse(List<int> rawData);
+}
+
+
+========================================
+FILE: .\lib\core\ble_parsers\ble_parser_factory.dart
+========================================
+
+import 'ble_parser.dart';
+import 'starthouse_rs500_parser.dart';
+
+class BleParserFactory {
+  static BleParser? getParser(String? localName, Map<int, List<int>> manufacturerData, List<String> serviceUuids) {
+    if (localName != null && localName.contains('StartHouse RS 500')) {
+      return StartHouseRS500Parser();
+    }
+    if (serviceUuids.any((uuid) => uuid.toLowerCase().contains('1826'))) {
+      return StartHouseRS500Parser(); 
+    }
+    return null;
+  }
+}
+
+
+========================================
+FILE: .\lib\core\ble_parsers\starthouse_rs500_parser.dart
+========================================
+
+import 'ble_parser.dart';
+
+class StartHouseRS500Parser implements BleParser {
+  @override
+  EquipmentType get type => EquipmentType.rower;
+
+  @override
+  Map<String, dynamic> parse(List<int> rawData) {
+    if (rawData.isEmpty) return {};
+    try {
+      final int strokeRate = rawData.length > 2 ? rawData[2] : 0;
+      final int distance = rawData.length > 4
+          ? (rawData[3] << 8) | rawData[4]
+          : 0;
+
+      return {
+        'equipment': 'StartHouse RS 500',
+        'stroke_rate': strokeRate,
+        'distance': distance,
+      };
+    } catch (e) {
+      return {'error': 'Parsing failed: $e'};
+    }
+  }
+}
+
+
+========================================
+FILE: .\lib\core\ble_service\ble_service.dart
+========================================
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+class BleService {
+  BluetoothDevice? _connectedDevice;
+  StreamSubscription<BluetoothConnectionState>? _connectionStateSub;
+  StreamSubscription<List<int>>? _dataSubscription;
+
+  final StreamController<List<int>> _rawDataController =
+      StreamController<List<int>>.broadcast();
+
+  // Используем наш собственный enum или передаем состояния через обертку,
+  // но для сохранения обратной совместимости с вашим BLoC, мы будем слать
+  // BluetoothConnectionState.disconnected / .connected, а фазу подключения
+  // BLoC перехватит сам при вызове метода.
+  final StreamController<BluetoothConnectionState> _stateController =
+      StreamController<BluetoothConnectionState>.broadcast();
+
+  Stream<List<int>> get rawDataStream => _rawDataController.stream;
+  Stream<BluetoothConnectionState> get connectionStateStream =>
+      _stateController.stream;
+
+  bool _isAutoReconnecting = false;
+  String? _lastDeviceAddress;
+
+  Stream<List<ScanResult>> get scanResults => FlutterBluePlus.scanResults;
+
+  Future<void> startScan() async {
+    try {
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 15));
+    } catch (e) {
+      debugPrint('Ошибка запуска сканирования BLE: $e');
+    }
+  }
+
+  Future<void> stopScan() async {
+    await FlutterBluePlus.stopScan();
+  }
+
+  Future<void> connect(String address) async {
+    _lastDeviceAddress = address;
+    _isAutoReconnecting = false;
+    final device = BluetoothDevice.fromId(address);
+    await _establishConnection(device);
+  }
+
+  Future<void> _establishConnection(BluetoothDevice device) async {
+    await _connectionStateSub?.cancel();
+
+    _connectionStateSub = device.connectionState.listen((state) {
+      if (!_isAutoReconnecting) {
+        _stateController.add(state);
+      }
+      if (state == BluetoothConnectionState.disconnected &&
+          _lastDeviceAddress != null &&
+          !_isAutoReconnecting) {
+        _handleAutoReconnect();
+      }
+    });
+
+    try {
+      await device.connect(
+        license: License.nonprofit,
+        timeout: const Duration(seconds: 10),
+      );
+      _connectedDevice = device;
+
+      final List<BluetoothService> services = await device.discoverServices();
+      for (var service in services) {
+        for (var characteristic in service.characteristics) {
+          if (characteristic.properties.notify ||
+              characteristic.properties.indicate) {
+            await characteristic.setNotifyValue(true);
+            await _dataSubscription?.cancel();
+            _dataSubscription = characteristic.lastValueStream.listen((value) {
+              _rawDataController.add(value);
+            });
+          }
+        }
+      }
+    } catch (e) {
+      _stateController.add(BluetoothConnectionState.disconnected);
+      rethrow;
+    }
+  }
+
+  Future<void> _handleAutoReconnect() async {
+    if (_lastDeviceAddress == null) return;
+    _isAutoReconnecting = true;
+
+    for (int i = 0; i < 3; i++) {
+      if (!_isAutoReconnecting) return;
+
+      // Вместо отправки несуществующего состояния в поток плагина,
+      // мы ничего не шлем или полагаемся на состояние BleConnecting,
+      // которое BleConnectionBloc выставляет у себя внутри при получении команды автоподключения.
+
+      try {
+        final device = BluetoothDevice.fromId(_lastDeviceAddress!);
+        await _establishConnection(device);
+        _isAutoReconnecting = false;
+        return;
+      } catch (_) {
+        await Future<void>.delayed(const Duration(seconds: 5));
+      }
+    }
+    _isAutoReconnecting = false;
+    _stateController.add(BluetoothConnectionState.disconnected);
+  }
+
+  Future<void> disconnect() async {
+    _lastDeviceAddress = null;
+    _isAutoReconnecting = false;
+    await _dataSubscription?.cancel();
+    await _connectionStateSub?.cancel();
+    if (_connectedDevice != null) {
+      await _connectedDevice!.disconnect();
+      _connectedDevice = null;
+    }
+    _stateController.add(BluetoothConnectionState.disconnected);
+  }
+
+  void dispose() {
+    _rawDataController.close();
+    _stateController.close();
+  }
+}
+
+
+========================================
+FILE: .\lib\core\di\injection.dart
+========================================
+
+import 'package:get_it/get_it.dart';
+
+import '../ble_service/ble_service.dart';
+
+final getIt = GetIt.instance;
+
+void setupDependencies() {
+  getIt.registerLazySingleton<BleService>(() => BleService());
+}
+
+
+========================================
+FILE: .\lib\core\theme\app_theme.dart
+========================================
+
+import 'package:flutter/material.dart';
+
+class AppTheme {
+  static const Color primary = Colors.blueAccent;
+  static const Color inactive = Colors.white54;
+  static const Color backgroundBlack = Color(0xDE000000);
+
+  static const Duration animationDuration = Duration(milliseconds: 250);
+  static const Curve animationCurve = Curves.easeInOutCubic;
+
+  static final ThemeData darkTheme = ThemeData.dark(useMaterial3: true)
+      .copyWith(
+        scaffoldBackgroundColor: const Color(0xFF121212),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF1F1F1F),
+          foregroundColor: Colors.white,
+        ),
+      );
+
+  static final ThemeData lightTheme = ThemeData.light(useMaterial3: true)
+      .copyWith(
+        scaffoldBackgroundColor: const Color(0xFFF5F5F5),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black87,
+          elevation: 1,
+        ),
+      );
+}
+
+
+========================================
+FILE: .\lib\core\theme\cubit\theme_cubit.dart
+========================================
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+class ThemeCubit extends Cubit<ThemeMode> {
+  ThemeCubit() : super(ThemeMode.dark);
+
+  void toggleTheme() {
+    emit(state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
+  }
+}
+
+
+========================================
+FILE: .\lib\features\equipment_finder\ui\equipment_finder_screen.dart
+========================================
+
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+
+import '../../../core/ble_parsers/ble_parser.dart';
+import '../../../core/ble_parsers/ble_parser_factory.dart';
+import '../../../core/ble_service/ble_service.dart';
+import '../../../core/di/injection.dart';
+import '../../shared/ble_connection_bloc/ble_connection_bloc.dart';
+import '../../shared/ble_connection_bloc/ble_connection_event.dart';
+import '../../shared/ble_connection_bloc/ble_connection_state.dart';
+
+class EquipmentFinderScreen extends StatefulWidget {
+  const EquipmentFinderScreen({super.key});
+
+  @override
+  State<EquipmentFinderScreen> createState() => _EquipmentFinderScreenState();
+}
+
+class _EquipmentFinderScreenState extends State<EquipmentFinderScreen> {
+  final BleService _bleService = getIt<BleService>();
+  bool _hasPermissions = false;
+  bool _isCheckingPermissions = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WakelockPlus.enable();
+    _checkAndRequestPermissions();
+  }
+
+  @override
+  void dispose() {
+    WakelockPlus.disable();
+    _bleService.stopScan();
+    super.dispose();
+  }
+
+  /// Запрос необходимых разрешений в зависимости от платформы
+  Future<void> _checkAndRequestPermissions() async {
+    setState(() {
+      _isCheckingPermissions = true;
+    });
+
+    if (Platform.isAndroid) {
+      // Комплексный запрос для Android 12+ и более старых версий
+      final Map<Permission, PermissionStatus> statuses = await [
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.location,
+      ].request();
+
+      final allGranted = statuses.values.every((status) => status.isGranted);
+
+      if (mounted) {
+        setState(() {
+          _hasPermissions = allGranted;
+          _isCheckingPermissions = false;
+        });
+      }
+    } else if (Platform.isIOS) {
+      // Запрос для iOS
+      final PermissionStatus bluetoothStatus = await Permission.bluetooth
+          .request();
+
+      if (mounted) {
+        setState(() {
+          _hasPermissions = bluetoothStatus.isGranted;
+          _isCheckingPermissions = false;
+        });
+      }
+    }
+
+    // Если разрешения получены — автоматически запускаем сканирование
+    if (_hasPermissions) {
+      _bleService.startScan();
+    }
+  }
+
+  IconData _getEquipmentIcon(EquipmentType type) {
+    switch (type) {
+      case EquipmentType.rower:
+        return Icons.rowing;
+      case EquipmentType.bike:
+        return Icons.directions_bike;
+      case EquipmentType.treadmill:
+        return Icons.directions_run;
+      case EquipmentType.stepper:
+        return Icons.height;
+      default:
+        return Icons.bluetooth;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 1. Экран проверки разрешений (загрузка)
+    if (_isCheckingPermissions) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    // 2. Экран, если пользователь отказал в разрешениях
+    if (!_hasPermissions) {
+      return Scaffold(
+        body: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.gpp_bad, size: 80, color: Colors.redAccent),
+              const SizedBox(height: 24),
+              const Text(
+                'Доступ к Bluetooth отклонен',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Для поиска спортивных тренажеров приложению ZonEx необходимы разрешения на работу с Bluetooth.',
+                style: TextStyle(color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.settings),
+                label: const Text('Открыть настройки'),
+                onPressed: () => openAppSettings(),
+              ),
+              TextButton(
+                onPressed: _checkAndRequestPermissions,
+                child: const Text('Повторить запрос'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 3. Основной рабочий экран Finder, если разрешения предоставлены
+    return BlocListener<BleConnectionBloc, BleConnectionState>(
+      listener: (context, state) {
+        if (state is BleConnectionError) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(state.message), backgroundColor: Colors.red),
+          );
+        }
+      },
+      child: StreamBuilder<List<ScanResult>>(
+        stream: _bleService.scanResults,
+        builder: (context, snapshot) {
+          final results = snapshot.data ?? [];
+
+          if (results.isEmpty) {
+            return const Center(
+              child: Text(
+                'Тренажеры поблизости не найдены',
+                style: TextStyle(fontSize: 16),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.only(bottom: 120, top: 8),
+            itemCount: results.length,
+            itemBuilder: (context, index) {
+              final r = results[index];
+              final parser = BleParserFactory.getParser(
+                r.advertisementData.advName,
+                r.advertisementData.manufacturerData,
+                r.advertisementData.serviceUuids
+                    .map((e) => e.toString())
+                    .toList(),
+              );
+              final type = parser?.type ?? EquipmentType.unknown;
+
+              return BlocBuilder<BleConnectionBloc, BleConnectionState>(
+                builder: (context, state) {
+                  Color iconColor = Colors.grey;
+                  if (state is BleConnected) iconColor = Colors.green;
+                  if (state is BleConnecting) iconColor = Colors.red;
+
+                  return ListTile(
+                    title: Text(
+                      r.advertisementData.advName.isEmpty
+                          ? 'Unknown Device'
+                          : r.advertisementData.advName,
+                    ),
+                    subtitle: Text('${r.device.remoteId}\nRSSI: ${r.rssi} dBm'),
+                    trailing: Icon(
+                      _getEquipmentIcon(type),
+                      color: iconColor,
+                      size: 28,
+                    ),
+                    onTap: () {
+                      context.read<BleConnectionBloc>().add(
+                        ConnectToDevice(r.device.remoteId.toString()),
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+========================================
+FILE: .\lib\features\navigation\cubit\navigation_cubit.dart
+========================================
+
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+enum NavbarItem {
+  equipmentFinder,
+  activeSession,
+  activityInsights,
+  preferences,
+  account,
+}
+
+class NavigationCubit extends Cubit<NavbarItem> {
+  NavigationCubit() : super(NavbarItem.equipmentFinder);
+  void changePage(NavbarItem item) => emit(item);
+}
+
+
+========================================
+FILE: .\lib\features\navigation\ui\main_screen.dart
+========================================
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+import '../../../core/ble_service/ble_service.dart';
+import '../../../core/di/injection.dart';
+import '../../../core/theme/cubit/theme_cubit.dart';
+import '../../equipment_finder/ui/equipment_finder_screen.dart';
+import '../cubit/navigation_cubit.dart';
+import 'widgets/floating_bottom_navbar.dart';
+import 'widgets/placeholder_screens.dart';
+
+class MainScreen extends StatelessWidget {
+  const MainScreen({super.key});
+
+  String _getScreenTitle(NavbarItem item) {
+    switch (item) {
+      case NavbarItem.equipmentFinder:
+        return 'ZonEx - Equipment Finder';
+      case NavbarItem.activeSession:
+        return 'Active Session';
+      case NavbarItem.activityInsights:
+        return 'Activity Insights';
+      case NavbarItem.preferences:
+        return 'Preferences';
+      case NavbarItem.account:
+        return 'Account Profile';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final BleService bleService = getIt<BleService>();
+
+    return BlocProvider(
+      create: (context) => NavigationCubit(),
+      child: BlocBuilder<NavigationCubit, NavbarItem>(
+        builder: (context, activeItem) {
+          return Scaffold(
+            extendBody: true,
+            appBar: AppBar(
+              title: Text(_getScreenTitle(activeItem)),
+              actions: [
+                if (activeItem == NavbarItem.equipmentFinder)
+                  StreamBuilder<bool>(
+                    stream: FlutterBluePlus.isScanning,
+                    builder: (context, snapshot) {
+                      final isScanning = snapshot.data ?? false;
+                      return isScanning
+                          ? const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 12.0),
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            )
+                          : IconButton(
+                              icon: const Icon(Icons.refresh),
+                              onPressed: () => bleService.startScan(),
+                            );
+                    },
+                  ),
+                BlocBuilder<ThemeCubit, ThemeMode>(
+                  builder: (context, themeMode) {
+                    final isDark = themeMode == ThemeMode.dark;
+                    return IconButton(
+                      icon: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        transitionBuilder: (child, animation) =>
+                            ScaleTransition(scale: animation, child: child),
+                        child: Icon(
+                          isDark ? Icons.dark_mode : Icons.light_mode,
+                          key: ValueKey<bool>(isDark),
+                          color: isDark ? Colors.amberAccent : Colors.orange,
+                        ),
+                      ),
+                      onPressed: () => context.read<ThemeCubit>().toggleTheme(),
+                    );
+                  },
+                ),
+                const SizedBox(width: 8),
+              ],
+            ),
+            body: Stack(
+              children: [
+                IndexedStack(
+                  index: activeItem.index,
+                  children: const [
+                    EquipmentFinderScreen(),
+                    PlaceholderScreen(
+                      title: 'Active Session',
+                      icon: Icons.play_circle_filled,
+                      accentColor: Colors.greenAccent,
+                    ),
+                    PlaceholderScreen(
+                      title: 'Activity Insights',
+                      icon: Icons.insert_chart_outlined,
+                      accentColor: Colors.purpleAccent,
+                    ),
+                    PlaceholderScreen(
+                      title: 'Preferences',
+                      icon: Icons.tune,
+                      accentColor: Colors.orangeAccent,
+                    ),
+                    PlaceholderScreen(
+                      title: 'Account Profile',
+                      icon: Icons.account_circle_outlined,
+                      accentColor: Colors.tealAccent,
+                    ),
+                  ],
+                ),
+                const Positioned(
+                  bottom: 24,
+                  left: 16,
+                  right: 16,
+                  child: FloatingBottomNavbar(),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+========================================
+FILE: .\lib\features\navigation\ui\widgets\floating_bottom_navbar.dart
+========================================
+
+import 'dart:ui';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../../../core/theme/app_theme.dart';
+import '../../cubit/navigation_cubit.dart';
+
+class FloatingBottomNavbar extends StatelessWidget {
+  const FloatingBottomNavbar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(32),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundBlack,
+            borderRadius: BorderRadius.circular(32),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.08),
+              width: 0.5,
+            ),
+          ),
+          child: BlocBuilder<NavigationCubit, NavbarItem>(
+            builder: (context, currentItem) {
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: NavbarItem.values.map((item) {
+                  final isSelected = currentItem == item;
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () =>
+                        context.read<NavigationCubit>().changePage(item),
+                    child: AnimatedScale(
+                      scale: isSelected ? 1.1 : 1.0,
+                      duration: AppTheme.animationDuration,
+                      curve: AppTheme.animationCurve,
+                      child: AnimatedOpacity(
+                        opacity: isSelected ? 1.0 : 0.5,
+                        duration: AppTheme.animationDuration,
+                        child: SizedBox(
+                          width: 65,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _getIcon(item),
+                                color: isSelected
+                                    ? AppTheme.primary
+                                    : AppTheme.inactive,
+                                size: 24,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _getLabel(item),
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? AppTheme.primary
+                                      : AppTheme.inactive,
+                                  fontSize: 10,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _getIcon(NavbarItem item) {
+    switch (item) {
+      case NavbarItem.equipmentFinder:
+        return Icons.search;
+      case NavbarItem.activeSession:
+        return Icons.play_circle_outline;
+      case NavbarItem.activityInsights:
+        return Icons.bar_chart;
+      case NavbarItem.preferences:
+        return Icons.settings;
+      case NavbarItem.account:
+        return Icons.person;
+    }
+  }
+
+  String _getLabel(NavbarItem item) {
+    switch (item) {
+      case NavbarItem.equipmentFinder:
+        return 'Finder';
+      case NavbarItem.activeSession:
+        return 'Session';
+      case NavbarItem.activityInsights:
+        return 'Insights';
+      case NavbarItem.preferences:
+        return 'Prefs';
+      case NavbarItem.account:
+        return 'Account';
+    }
+  }
+}
+
+
+========================================
+FILE: .\lib\features\navigation\ui\widgets\placeholder_screens.dart
+========================================
+
+import 'package:flutter/material.dart';
+
+class PlaceholderScreen extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final Color accentColor;
+
+  const PlaceholderScreen({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.only(bottom: 120, left: 24, right: 24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 80, color: accentColor),
+            ),
+            const SizedBox(height: 24),
+            Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Text(
+              'Тестовая заглушка.\nСостояние вкладки сохранено в IndexedStack.',
+              style: TextStyle(color: Theme.of(context).hintColor, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+========================================
+FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_bloc.dart
+========================================
+
+import 'dart:async';
+
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+import '../../../core/ble_service/ble_service.dart';
+import 'ble_connection_event.dart';
+import 'ble_connection_state.dart';
+
+class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
+  final BleService _bleService;
+  StreamSubscription<BluetoothConnectionState>? _statusSubscription;
+
+  BleConnectionBloc(this._bleService) : super(BleDisconnected()) {
+    on<ConnectToDevice>(_onConnect);
+    on<DisconnectFromDevice>(_onDisconnect);
+    on<UpdateConnectionStatus>(_onStatusUpdate);
+
+    _statusSubscription = _bleService.connectionStateStream.listen((status) {
+      if (!isClosed) add(UpdateConnectionStatus(status));
+    });
+  }
+
+  Future<void> _onConnect(
+    ConnectToDevice event,
+    Emitter<BleConnectionState> emit,
+  ) async {
+    emit(BleConnecting());
+    try {
+      await _bleService.connect(event.address);
+    } catch (e) {
+      emit(BleConnectionError("Не удалось установить соединение"));
+    }
+  }
+
+  Future<void> _onDisconnect(
+    DisconnectFromDevice event,
+    Emitter<BleConnectionState> emit,
+  ) async {
+    await _bleService.disconnect();
+    emit(BleDisconnected());
+  }
+
+  void _onStatusUpdate(
+    UpdateConnectionStatus event,
+    Emitter<BleConnectionState> emit,
+  ) {
+    if (event.status == BluetoothConnectionState.connected) {
+      emit(BleConnected("Тренажер"));
+    } else {
+      emit(BleDisconnected());
+    }
+  }
+
+  @override
+  Future<void> close() {
+    _statusSubscription?.cancel();
+    return super.close();
+  }
+}
+
+
+========================================
+FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_event.dart
+========================================
+
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+abstract class BleConnectionEvent {}
+class ConnectToDevice extends BleConnectionEvent { final String address; ConnectToDevice(this.address); }
+class DisconnectFromDevice extends BleConnectionEvent {}
+class UpdateConnectionStatus extends BleConnectionEvent { final BluetoothConnectionState status; UpdateConnectionStatus(this.status); }
+
+
+========================================
+FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_state.dart
+========================================
+
+abstract class BleConnectionState {}
+class BleDisconnected extends BleConnectionState {}
+class BleConnecting extends BleConnectionState {}
+class BleConnected extends BleConnectionState {
+  final String deviceName;
+  BleConnected(this.deviceName);
+}
+class BleConnectionError extends BleConnectionState {
+  final String message;
+  BleConnectionError(this.message);
+}
+
+
+
+========================================
+FILE: .\test\widget_test.dart
+========================================
+
+
