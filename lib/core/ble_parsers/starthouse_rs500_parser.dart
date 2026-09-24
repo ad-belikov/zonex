@@ -1,31 +1,31 @@
-import 'dart:io';
+// FILE: .\lib\core\ble_parsers\starthouse_rs500_parser.dart
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
+
+import '../ble_parsers/models/workout_data.dart';
 import 'ble_parser.dart';
 
 class StartHouseRS500Parser implements BleParser {
   @override
   EquipmentType get type => EquipmentType.rower;
 
-  // ИСПРАВЛЕНО: Конфигурация заполнена на основе спецификаций Kinomap / FitShow и физиологии гребли
   @override
   SmoothingConfig get smoothingConfig => const SmoothingConfig(
     enableSmoothing: true,
-    // Метод А: SMA с временным окном 10 сек для стабилизации частоты гребков
     strokeRateConfig: ParameterFilterConfig(
       method: SmoothingMethod.simpleMovingAverage,
       windowSize: 10,
     ),
-    // Метод А: SMA с окном 4 сек для полного сглаживания нулей в фазе расслабления (возврата)
     powerConfig: ParameterFilterConfig(
       method: SmoothingMethod.simpleMovingAverage,
       windowSize: 4,
     ),
-    // Метод А: SMA с окном 4 сек для плавной и красивой индикации темпа на дисплее
     paceConfig: ParameterFilterConfig(
       method: SmoothingMethod.simpleMovingAverage,
       windowSize: 4,
     ),
-    // Метод Б: EMA с коэффициентом alpha = 0.25 (усреднение ~4-5 сек при 1 Гц) для гашения сбоев датчиков 5 кГц
     heartRateConfig: ParameterFilterConfig(
       method: SmoothingMethod.exponentialMovingAverage,
       alpha: 0.25,
@@ -33,52 +33,56 @@ class StartHouseRS500Parser implements BleParser {
   );
 
   @override
-  Map<String, dynamic> parse(List<int> rawData, {int? iosHeartRate}) {
-    if (rawData.isEmpty) return {};
+  WorkoutData parse(List<int> rawData, {int? iosHeartRate}) {
+    if (rawData.isEmpty || rawData.length < 13) {
+      return const WorkoutData.error(
+        'Критическая ошибка: Пакет данных кастомного гребца усечен.',
+      );
+    }
 
     try {
-      final double strokeRate = rawData.length > 2 ? rawData[2] * 0.5 : 0.0;
+      final Uint8List bytes = Uint8List.fromList(rawData);
+      final ByteData buffer = ByteData.sublistView(bytes);
 
-      final int strokeCount = rawData.length > 4
-          ? (rawData[3] << 8) | rawData[4]
-          : 0;
+      final double strokeRate = (buffer.getUint8(2) & 0xFF) * 0.5;
+      final int strokeCount = buffer.getUint16(3);
+      final int distance =
+          (buffer.getUint8(5) << 16) |
+          (buffer.getUint8(6) << 8) |
+          buffer.getUint8(7);
+      final int pace = buffer.getUint16(8);
 
-      final int distance = rawData.length > 7
-          ? (rawData[5] << 16) | (rawData[6] << 8) | rawData[7]
-          : 0;
+      final int rawPower = buffer.getInt16(10);
+      final double power = (rawPower < 0 || rawPower > 3000)
+          ? 0.0
+          : rawPower.toDouble();
 
-      final int pace = rawData.length > 9 ? (rawData[8] << 8) | rawData[9] : 0;
+      int finalHeartRate = buffer.getUint8(12) & 0xFF;
 
-      double power = 0.0;
-      if (rawData.length > 11) {
-        int rawPower = (rawData[10] << 8) | rawData[11];
-        if (rawPower > 32767) {
-          rawPower -= 65536;
-        }
-        power = rawPower.toDouble();
-      }
-
-      int finalHeartRate = 0;
-      if (rawData.length > 12) {
-        final int ftmsHeartRate = rawData[12];
-        finalHeartRate = Platform.isIOS && iosHeartRate != null
-            ? iosHeartRate
-            : ftmsHeartRate;
-      } else if (iosHeartRate != null) {
+      // ИСПРАВЛЕНО: Вместо обращения к Platform (которое падает в изолятах)
+      // используем безопасный для веб/изолятов kIsWeb / defaultTargetPlatform.
+      final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
+      if (isIOS && iosHeartRate != null) {
         finalHeartRate = iosHeartRate;
       }
 
-      return {
-        'equipment': 'StartHouse RS 500',
-        'stroke_rate': strokeRate,
-        'stroke_count': strokeCount,
-        'distance': distance.toDouble(),
-        'pace': pace,
-        'power': power,
-        'heart_rate': finalHeartRate,
-      };
+      if (finalHeartRate < 30 || finalHeartRate > 240) {
+        finalHeartRate = 0;
+      }
+
+      return WorkoutData(
+        equipmentName: 'StartHouse RS 500',
+        heartRate: finalHeartRate,
+        distance: distance.toDouble(),
+        duration: 0,
+        energy: 0.0,
+        strokeRate: strokeRate,
+        strokeCount: strokeCount,
+        splitTime500m: pace,
+        bikePower: power,
+      );
     } catch (e) {
-      return {'error': 'Parsing failed: $e'};
+      return WorkoutData.error('Исключение парсинга буфера StartHouse: $e');
     }
   }
 }

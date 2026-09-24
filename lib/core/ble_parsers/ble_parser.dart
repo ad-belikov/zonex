@@ -1,18 +1,18 @@
+// FILE: .\lib\core\ble_parsers\ble_parser.dart
+import 'models/workout_data.dart';
+
 enum EquipmentType { rower, treadmill, bike, stepper, unknown }
 
-// ДОБАВЛЕНО: Доступные математические методы фильтрации данных
 enum SmoothingMethod {
   none,
   simpleMovingAverage, // Метод А: SMA (Скользящее среднее)
   exponentialMovingAverage, // Метод Б: EMA (Экспоненциальное сглаживание)
 }
 
-// ДОБАВЛЕНО: Инкапсулированная конфигурация для конкретного спортивного параметра
 class ParameterFilterConfig {
   final SmoothingMethod method;
-  final int windowSize; // Для SMA: количество секунд/событий в окне
-  final double
-  alpha; // Для EMA: коэффициент значимости нового замера (0.0 - 1.0)
+  final int windowSize;
+  final double alpha;
 
   const ParameterFilterConfig({
     required this.method,
@@ -26,13 +26,12 @@ class ParameterFilterConfig {
       alpha = 1.0;
 }
 
-// ДОБАВЛЕНО: Общий класс настроек фильтрации, запрашиваемый от тренажера
 class SmoothingConfig {
   final bool enableSmoothing;
-  final ParameterFilterConfig strokeRateConfig; // Частота гребков (SPM)
-  final ParameterFilterConfig powerConfig; // Мощность (Ватт)
-  final ParameterFilterConfig paceConfig; // Темп / Скорость (Время на 500м)
-  final ParameterFilterConfig heartRateConfig; // Пульс (BPM)
+  final ParameterFilterConfig strokeRateConfig;
+  final ParameterFilterConfig powerConfig;
+  final ParameterFilterConfig paceConfig;
+  final ParameterFilterConfig heartRateConfig;
 
   const SmoothingConfig({
     this.enableSmoothing = false,
@@ -46,5 +45,7 @@ class SmoothingConfig {
 abstract class BleParser {
   EquipmentType get type;
   SmoothingConfig get smoothingConfig;
-  Map<String, dynamic> parse(List<int> rawData, {int? iosHeartRate});
+
+  // ИЗМЕНЕНИЕ: Метод parse теперь возвращает строго WorkoutData
+  WorkoutData parse(List<int> rawData, {int? iosHeartRate});
 }

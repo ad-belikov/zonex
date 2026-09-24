@@ -1,22 +1,22 @@
-abstract class BleConnectionState {}
+// FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_state.dart
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-class BleDisconnected extends BleConnectionState {}
+part 'ble_connection_state.freezed.dart';
 
-// ИСПРАВЛЕНО: Теперь состояние хранит адрес подключаемого устройства для точечной анимации в UI
-class BleConnecting extends BleConnectionState {
-  final String connectingAddress;
-  BleConnecting(this.connectingAddress);
-}
+@Freezed()
+sealed class BleConnectionState with _$BleConnectionState {
+  const factory BleConnectionState.disconnected() = _Disconnected;
 
-// ИСПРАВЛЕНО: Состояние содержит точные параметры подключенного тренажера
-class BleConnected extends BleConnectionState {
-  final String deviceAddress;
-  final String deviceName;
+  // ИСПРАВЛЕНО: Добавлен необязательный параметр attempt для отображения на UI
+  const factory BleConnectionState.connecting(
+    String connectingAddress, {
+    @Default(1) int attempt,
+  }) = _Connecting;
 
-  BleConnected({required this.deviceAddress, required this.deviceName});
-}
+  const factory BleConnectionState.connected({
+    required String deviceAddress,
+    required String deviceName,
+  }) = _Connected;
 
-class BleConnectionError extends BleConnectionState {
-  final String message;
-  BleConnectionError(this.message);
+  const factory BleConnectionState.error(String message) = _Error;
 }

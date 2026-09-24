@@ -1,7 +1,10 @@
+// FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_bloc.dart
 import 'dart:async';
 
+import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:rxdart/rxdart.dart';
 
 import '../../../core/ble_service/ble_service.dart';
 import 'ble_connection_event.dart';
@@ -12,17 +15,26 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
   StreamSubscription<BluetoothConnectionState>? _statusSubscription;
 
   String? _currentTargetAddress;
-  // ДОБАВЛЕНО: Счетчик текущих попыток переподключения к тренажеру
   int _reconnectAttempts = 0;
-  // ДОБАВЛЕНО: Ссылка на таймер задержки между повторными попытками для предотвращения утечек
-  Timer? _reconnectTimer;
+  bool _isManualDisconnect = false;
+  static const int _maxReconnectAttempts = 3;
 
-  BleConnectionBloc(this._bleService) : super(BleDisconnected()) {
-    on<ConnectToDevice>(_onConnect);
-    on<DisconnectFromDevice>(_onDisconnect);
+  BleConnectionBloc(this._bleService)
+    : super(const BleConnectionState.disconnected()) {
+    on<ConnectToDevice>(_onConnect, transformer: sequential());
+    on<DisconnectFromDevice>(_onDisconnect, transformer: sequential());
     on<UpdateConnectionStatus>(_onStatusUpdate);
-    // ДОБАВЛЕНО: Регистрация нового обработчика для атомарных попыток переподключения
-    on<RetryConnectionAfterDisconnect>(_onRetryConnection);
+
+    // ИСПРАВЛЕНО: Интегрирован реактивный перезапускаемый трансформер с задержкой (Debounce/Delay)
+    on<RetryConnectionAfterDisconnect>(
+      _onRetryConnection,
+      transformer: (events, mapper) {
+        return restartable<RetryConnectionAfterDisconnect>().call(
+          events.delay(const Duration(seconds: 5)),
+          mapper,
+        );
+      },
+    );
 
     _statusSubscription = _bleService.connectionStateStream.listen((status) {
       if (!isClosed) add(UpdateConnectionStatus(status));
@@ -33,16 +45,19 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     ConnectToDevice event,
     Emitter<BleConnectionState> emit,
   ) async {
-    _reconnectTimer
-        ?.cancel(); // ДОБАВЛЕНО: Сброс таймеров при явном новом подключении
-    _reconnectAttempts = 0; // ДОБАВЛЕНО: Сброс счетчика попыток
+    _reconnectAttempts = 0;
     _currentTargetAddress = event.address;
+    _isManualDisconnect = false;
 
-    emit(BleConnecting(event.address));
+    emit(BleConnectionState.connecting(event.address));
     try {
       await _bleService.connect(event.address);
     } catch (e) {
-      emit(BleConnectionError("Не удалось установить соединение"));
+      if (!isClosed) {
+        emit(
+          const BleConnectionState.error("Не удалось установить соединение"),
+        );
+      }
     }
   }
 
@@ -50,12 +65,15 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     DisconnectFromDevice event,
     Emitter<BleConnectionState> emit,
   ) async {
-    _reconnectTimer
-        ?.cancel(); // ДОБАВЛЕНО: Отменяем любые фоновые попытки автоконнекта
+    _isManualDisconnect = true;
     _currentTargetAddress = null;
     _reconnectAttempts = 0;
+
     await _bleService.disconnect();
-    emit(BleDisconnected());
+
+    if (!isClosed) {
+      emit(const BleConnectionState.disconnected());
+    }
   }
 
   void _onStatusUpdate(
@@ -64,55 +82,48 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
   ) {
     if (event.status == BluetoothConnectionState.connected &&
         _currentTargetAddress != null) {
-      _reconnectAttempts =
-          0; // ИСПРАВЛЕНО: Успешно подключились — обнуляем счетчик
-      _reconnectTimer?.cancel();
+      _reconnectAttempts = 0;
       emit(
-        BleConnected(
+        BleConnectionState.connected(
           deviceAddress: _currentTargetAddress!,
           deviceName: "Тренажер",
         ),
       );
     } else if (event.status == BluetoothConnectionState.disconnected) {
-      // ИСПРАВЛЕНО: Если связь пропала, но адрес устройства сохранен (не было ручного дисконнекта) -> автореконнект
-      if (_currentTargetAddress != null && _reconnectAttempts < 3) {
+      if (!_isManualDisconnect &&
+          _currentTargetAddress != null &&
+          _reconnectAttempts < _maxReconnectAttempts) {
+        _reconnectAttempts++;
+
+        // ИСПРАВЛЕНО: Передаем текущую попытку реконнекта в стейт
         emit(
-          BleConnecting(_currentTargetAddress!),
-        ); // Переводим UI в состояние ожидания
-        _scheduleReconnect();
-      } else {
-        // ИСПРАВЛЕНО: Попытки исчерпаны или это был ручной выход
+          BleConnectionState.connecting(
+            _currentTargetAddress!,
+            attempt: _reconnectAttempts,
+          ),
+        );
+
+        add(RetryConnectionAfterDisconnect(_currentTargetAddress!));
+      } else if (_isManualDisconnect ||
+          _reconnectAttempts >= _maxReconnectAttempts) {
         _currentTargetAddress = null;
         _reconnectAttempts = 0;
-        emit(BleDisconnected());
+        emit(const BleConnectionState.disconnected());
       }
     }
   }
 
-  // ДОБАВЛЕНО: Логика планирования следующей попытки подключения через 5 секунд
-  void _scheduleReconnect() {
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 5), () {
-      if (!isClosed && _currentTargetAddress != null) {
-        _reconnectAttempts++;
-        add(RetryConnectionAfterDisconnect(_currentTargetAddress!));
-      }
-    });
-  }
-
-  // ДОБАВЛЕНО: Изолированная атомарная попытка переподключения в рамках BLoC-сессии
   Future<void> _onRetryConnection(
     RetryConnectionAfterDisconnect event,
     Emitter<BleConnectionState> emit,
   ) async {
-    // Проверяем, что цель подключения не изменилась за время ожидания таймера
-    if (_currentTargetAddress == event.address) {
-      emit(BleConnecting(event.address));
+    // Если пользователь за время ожидания не нажал отмену и адрес совпадает
+    if (_currentTargetAddress == event.address && !_isManualDisconnect) {
       try {
         await _bleService.connect(event.address);
-      } catch (_) {
-        // Ошибка перехватывается, статус disconnected из BleService
-        // через _statusSubscription заново вызовет метод _onStatusUpdate и спланирует следующую попытку
+      } catch (e) {
+        // Ошибка перехватывается, чтобы не уронить поток BLoC.
+        // Следующий вызов произойдет по событию disconnected из стрима, если лимит попыток не исчерпан.
       }
     }
   }
@@ -120,7 +131,6 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
   @override
   Future<void> close() {
     _statusSubscription?.cancel();
-    _reconnectTimer?.cancel(); // ДОБАВЛЕНО: Обязательная очистка таймера при закрытии Блока
     return super.close();
   }
 }

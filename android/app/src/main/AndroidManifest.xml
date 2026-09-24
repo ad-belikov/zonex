@@ -1,16 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
- 
-    <!-- Заявляем, что приложению нужен Bluetooth LE -->
-    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
-
-    <!-- Разрешения для Bluetooth (Android 12 и выше) -->
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:value="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-
-    <!-- Разрешения для старых версий Android и геолокации -->
-    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />  
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <application
         android:label="zonex_app"

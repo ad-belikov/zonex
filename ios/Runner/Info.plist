@@ -33,6 +33,11 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
+	<key>UIBackgroundModes</key>
+	<array>
+    	<string>bluetooth-central</string>
+    	<string>processing</string>
+	</array>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>

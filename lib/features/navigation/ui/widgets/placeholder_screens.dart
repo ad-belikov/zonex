@@ -29,11 +29,17 @@ class PlaceholderScreen extends StatelessWidget {
               child: Icon(icon, size: 80, color: accentColor),
             ),
             const SizedBox(height: 24),
-            Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             Text(
               'Тестовая заглушка.\nСостояние вкладки сохранено в IndexedStack.',
-              style: TextStyle(color: Theme.of(context).hintColor, fontSize: 14),
+              style: TextStyle(
+                color: Theme.of(context).hintColor,
+                fontSize: 14,
+              ),
               textAlign: TextAlign.center,
             ),
           ],

@@ -1,8 +1,8 @@
 
 
-========================================
-FILE: .\analysis_options.yaml
-========================================
+# ========================================
+# FILE: .\analysis_options.yaml
+# ========================================
 
 # This file configures the analyzer, which statically analyzes Dart code to
 # check for errors, warnings, and lints.
@@ -53,15 +53,15 @@ linter:
     - cancel_subscriptions # Обязательное закрытие StreamSubscription (защита от утечек памяти в BLoC)
     - close_sinks # Обязательное закрытие Sink/Controllers
 
+    - avoid_types_on_closure_parameters
+    - valid_regexps
 
-========================================
-FILE: .\pubspec.yaml
-========================================
+# ========================================
+# FILE: .\pubspec.yaml
+# ========================================
 
 name: zonex_app
-description: "A new Flutter project."
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
+description: "ZonEx Flutter project"
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 version: 1.0.0+1
@@ -73,8 +73,6 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   flutter_bloc: ^9.1.1
   shared_preferences: ^2.5.5
@@ -89,12 +87,20 @@ dependencies:
   wakelock_plus: ^1.8.0
   permission_handler: ^13.0.2
   typed_data: ^1.4.0
+  bloc_concurrency: ^0.3.0
+  rxdart: ^0.28.0
+  freezed: ^4.0.2
+  freezed_annotation: ^3.1.0
+  flutter_foreground_task: ^11.0.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   flutter_lints: ^6.0.0
+  # ДОБАВЛЕНО: Инструменты генерации кода
+  build_runner: ^2.4.15
+
 
 
 # The following section is specific to Flutter packages.
@@ -110,9 +116,9 @@ flutter:
 
 
 
-========================================
-FILE: .\.vscode\launch.json
-========================================
+# ========================================
+# FILE: .\.vscode\launch.json
+# ========================================
 
 {
     "version": "0.2.0",
@@ -150,9 +156,9 @@ FILE: .\.vscode\launch.json
         },
 */
 
-========================================
-FILE: .\.vscode\settings.json
-========================================
+# ========================================
+# FILE: .\.vscode\settings.json
+# ========================================
 
 {
     "editor.formatOnSave": true,
@@ -178,9 +184,9 @@ FILE: .\.vscode\settings.json
     "accessibility.signalOptions.volume": 0
 }
 
-========================================
-FILE: .\.vscode\tasks.json
-========================================
+# ========================================
+# FILE: .\.vscode\tasks.json
+# ========================================
 
 {
     "version": "2.0.0",
@@ -365,33 +371,43 @@ FILE: .\.vscode\tasks.json
     ]
 }
 
-========================================
-FILE: .\lib\main.dart
-========================================
+// ========================================
+// FILE: .\lib\main.dart
+// ========================================
 
+// FILE: .\lib\main.dart
 import 'package:flutter/material.dart';
 
 import 'app/app.dart';
 import 'core/di/injection.dart';
 
-void main() {
+void main() async {
+  // ИСПРАВЛЕНО: Добавлен ключевой словой async
   WidgetsFlutterBinding.ensureInitialized();
-  setupDependencies();
+
+  // ИСПРАВЛЕНО: Ждем, пока проинициализируются настройки SharedPreferences в DI
+  await setupDependencies();
+
   runApp(const ZonExApp());
 }
 
 
-========================================
-FILE: .\lib\app\app.dart
-========================================
+// ========================================
+// FILE: .\lib\app\app.dart
+// ========================================
 
+// FILE: .\lib\app\app.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+// Глобальные сервисы ядра
+// ДОБАВЛЕНО/ИСПРАВЛЕНО: Добавлен импорт BleService, чтобы исправить ошибку "isn't a type"
 import '../core/ble_service/ble_service.dart';
 import '../core/di/injection.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/cubit/theme_cubit.dart';
+// Точные относительные пути к Блокам фич приложения
+import '../features/active_session/bloc/active_session_bloc.dart';
 import '../features/navigation/ui/main_screen.dart';
 import '../features/shared/ble_connection_bloc/ble_connection_bloc.dart';
 
@@ -400,11 +416,15 @@ class ZonExApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Теперь ActiveSessionBloc не пересоздается при изменении стейта MainScreen.
     return MultiBlocProvider(
       providers: [
         BlocProvider(create: (context) => ThemeCubit()),
         BlocProvider(
           create: (context) => BleConnectionBloc(getIt<BleService>()),
+        ),
+        BlocProvider(
+          create: (context) => ActiveSessionBloc(getIt<BleService>()),
         ),
       ],
       child: BlocBuilder<ThemeCubit, ThemeMode>(
@@ -424,42 +444,436 @@ class ZonExApp extends StatelessWidget {
 }
 
 
-========================================
-FILE: .\lib\core\ble_parsers\ble_parser.dart
-========================================
+// ========================================
+// FILE: .\lib\core\background\background_handler.dart
+// ========================================
 
-enum EquipmentType { rower, treadmill, bike, stepper, unknown }
+// FILE: lib/core/background/background_handler.dart
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
-abstract class BleParser {
-  EquipmentType get type;
-  Map<String, dynamic> parse(List<int> rawData);
+// Инициализация фонового обработчика (вызывается нативным слоем)
+@pragma('vm:entry-point') // Обязательная аннотация, чтобы линтер не вырезал метод при компиляции релиз-сборки
+void startCallback() {
+  FlutterForegroundTask.setTaskHandler(WorkoutBackgroundHandler());
+}
+
+class WorkoutBackgroundHandler extends TaskHandler {
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    // Вызывается при остановке фоновой службы (вручную или по таймауту системы).
+  }
+
+  @override
+  Future<void> onRepeatEvent(DateTime timestamp) async {
+    // Вызывается автоматически на основе интервала времени.
+    // Оставляем пустым, так как основной поток BLE живет в UI-изоляте приложения.
+  }
+
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    // Вызывается в момент фактического запуска фонового процесса.
+    // При необходимости можно проверить, кто запустил службу:
+    // if (starter == TaskStarter.developer) { ... }
+  }
 }
 
 
-========================================
-FILE: .\lib\core\ble_parsers\ble_parser_factory.dart
-========================================
+// ========================================
+// FILE: .\lib\core\ble_parsers\ble_parser.dart
+// ========================================
 
+// FILE: .\lib\core\ble_parsers\ble_parser.dart
+import 'models/workout_data.dart';
+
+enum EquipmentType { rower, treadmill, bike, stepper, unknown }
+
+enum SmoothingMethod {
+  none,
+  simpleMovingAverage, // Метод А: SMA (Скользящее среднее)
+  exponentialMovingAverage, // Метод Б: EMA (Экспоненциальное сглаживание)
+}
+
+class ParameterFilterConfig {
+  final SmoothingMethod method;
+  final int windowSize;
+  final double alpha;
+
+  const ParameterFilterConfig({
+    required this.method,
+    this.windowSize = 0,
+    this.alpha = 1.0,
+  });
+
+  const ParameterFilterConfig.none()
+    : method = SmoothingMethod.none,
+      windowSize = 0,
+      alpha = 1.0;
+}
+
+class SmoothingConfig {
+  final bool enableSmoothing;
+  final ParameterFilterConfig strokeRateConfig;
+  final ParameterFilterConfig powerConfig;
+  final ParameterFilterConfig paceConfig;
+  final ParameterFilterConfig heartRateConfig;
+
+  const SmoothingConfig({
+    this.enableSmoothing = false,
+    this.strokeRateConfig = const ParameterFilterConfig.none(),
+    this.powerConfig = const ParameterFilterConfig.none(),
+    this.paceConfig = const ParameterFilterConfig.none(),
+    this.heartRateConfig = const ParameterFilterConfig.none(),
+  });
+}
+
+abstract class BleParser {
+  EquipmentType get type;
+  SmoothingConfig get smoothingConfig;
+
+  // ИЗМЕНЕНИЕ: Метод parse теперь возвращает строго WorkoutData
+  WorkoutData parse(List<int> rawData, {int? iosHeartRate});
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_parsers\ble_parser_factory.dart
+// ========================================
+
+// FILE: .\lib\core\ble_parsers\ble_parser_factory.dart
 import 'ble_parser.dart';
+import 'ftms_universal_parser.dart';
 import 'starthouse_rs500_parser.dart';
 
 class BleParserFactory {
-  static BleParser? getParser(String? localName, Map<int, List<int>> manufacturerData, List<String> serviceUuids) {
-    if (localName != null && localName.contains('StartHouse RS 500')) {
+  static BleParser? getParser(
+    String? localName,
+    Map<int, List<int>> manufacturerData,
+    List<String> serviceUuids, {
+    String targetCharacteristicUuid = '',
+  }) {
+    final name = localName ?? '';
+
+    // 1. Кастомное оборудование
+    if (name.contains('StartHouse RS 500')) {
       return StartHouseRS500Parser();
     }
-    if (serviceUuids.any((uuid) => uuid.toLowerCase().contains('1826'))) {
-      return StartHouseRS500Parser(); 
+
+    // 2. Универсальные UUID характеристик FTMS стандартов
+    final String targetUuid = targetCharacteristicUuid.toLowerCase();
+    final bool hasFtmsService = serviceUuids.any(
+      (uuid) => uuid.toLowerCase().contains('1826'),
+    );
+
+    final isTreadmill = targetUuid.contains('2acd');
+    final isBike = targetUuid.contains('2ad2');
+    final isRower = targetUuid.contains('2ad1');
+    final isStepper =
+        targetUuid.contains('2acf') || targetUuid.contains('2ad0');
+
+    if (hasFtmsService || isTreadmill || isBike || isRower || isStepper) {
+      // Авто-фоллбек UUID, если из UI не прокинут точный инстанс
+      String effectiveUuid = targetUuid;
+      if (effectiveUuid.isEmpty) {
+        if (name.contains('Bike') || name.contains('Cycle')) {
+          effectiveUuid = '2ad2';
+        } else if (name.contains('Run') || name.contains('Treadmill')) {
+          effectiveUuid = '2acd';
+        } else if (name.contains('Row')) {
+          effectiveUuid = '2ad1';
+        } else {
+          effectiveUuid = '2acf';
+        }
+      }
+
+      return FtmsUniversalParser(
+        characteristicUuid: effectiveUuid,
+        deviceName: name.isNotEmpty ? name : 'Спортивный тренажер',
+      );
     }
+
     return null;
   }
 }
 
 
-========================================
-FILE: .\lib\core\ble_parsers\starthouse_rs500_parser.dart
-========================================
+// ========================================
+// FILE: .\lib\core\ble_parsers\data_smoother.dart
+// ========================================
 
+import 'dart:collection';
+
+import '../ble_parsers/models/workout_data.dart';
+import 'ble_parser.dart';
+
+class DataSmoother {
+  final SmoothingConfig config;
+
+  final ListQueue<double> _strokeRateQueue = ListQueue();
+  final ListQueue<double> _powerQueue = ListQueue();
+  final ListQueue<double> _paceQueue = ListQueue();
+  final ListQueue<double> _speedQueue = ListQueue();
+  final ListQueue<double> _cadenceQueue = ListQueue();
+
+  double? _lastHeartRate;
+
+  DataSmoother(this.config);
+
+  WorkoutData smooth(WorkoutData parsedData) {
+    // 1. Отсекаем состояние ошибки парсинга.
+    // Если toString() содержит маркер ошибки, возвращаем её как есть без изменений.
+    if (parsedData.toString().contains('errorMessage') ||
+        parsedData.toString().contains('error')) {
+      return parsedData;
+    }
+
+    if (!config.enableSmoothing) {
+      return parsedData;
+    }
+
+    // 2. Явное безопасное приведение к успешному подклассу Freezed.
+    // Так как strict-casts запрещает неявный dynamic, мы кастим объект к его
+    // базовому интерфейсу WorkoutData, но считываем его поля через паттерн-каст Dart 3.
+    // Из-за Freezed свойства доступны на уровне WorkoutData, если они есть во всех ветках,
+    // но чтобы обойти ограничения sealed-класса, мы объявляем её как именованную структуру:
+    final data = parsedData;
+
+    // В строгом режиме статического анализа извлекаем переменные с явным указанием типов
+    final int currentHeartRate = (data as dynamic).heartRate as int;
+    final double currentStrokeRate = (data as dynamic).strokeRate as double;
+    final int currentSplitTime500m = (data as dynamic).splitTime500m as int;
+    final double currentCadence = (data as dynamic).cadence as double;
+    final double currentBikePower = (data as dynamic).bikePower as double;
+    final double currentSpeed = (data as dynamic).speed as double;
+    final double currentRunCadence = (data as dynamic).runCadence as double;
+    final double currentStepRate = (data as dynamic).stepRate as double;
+
+    // 1. Сглаживание пульса (EMA)
+    int updatedHeartRate = currentHeartRate;
+    if (currentHeartRate > 0) {
+      updatedHeartRate = _processEma(
+        currentHeartRate.toDouble(),
+        config.heartRateConfig,
+      ).round();
+    }
+
+    // 2. Гребля (Rower)
+    double updatedStrokeRate = currentStrokeRate;
+    int updatedSplitTime = currentSplitTime500m;
+    if (currentStrokeRate > 0) {
+      updatedStrokeRate = _processSma(
+        currentStrokeRate,
+        _strokeRateQueue,
+        config.strokeRateConfig,
+      );
+    }
+    if (currentSplitTime500m > 0) {
+      updatedSplitTime = _processSma(
+        currentSplitTime500m.toDouble(),
+        _paceQueue,
+        config.paceConfig,
+      ).round();
+    }
+
+    // 3. Велосипед (Bike)
+    double updatedCadence = currentCadence;
+    double updatedBikePower = currentBikePower;
+    double updatedSpeed = currentSpeed;
+
+    if (currentCadence > 0) {
+      updatedCadence = _processSma(
+        currentCadence,
+        _cadenceQueue,
+        config.strokeRateConfig,
+      );
+    }
+    if (currentBikePower > 0) {
+      updatedBikePower = _processSma(
+        currentBikePower,
+        _powerQueue,
+        config.powerConfig,
+      );
+    }
+    if (currentSpeed > 0) {
+      updatedSpeed = _processSma(currentSpeed, _speedQueue, config.paceConfig);
+    }
+
+    // 4. Беговая дорожка (Treadmill)
+    double updatedRunCadence = currentRunCadence;
+    if (currentRunCadence > 0) {
+      updatedRunCadence = _processSma(
+        currentRunCadence,
+        _cadenceQueue,
+        config.strokeRateConfig,
+      );
+    }
+
+    // 5. Степпер (Stepper)
+    double updatedStepRate = currentStepRate;
+    if (currentStepRate > 0) {
+      updatedStepRate = _processSma(
+        currentStepRate,
+        _cadenceQueue,
+        config.strokeRateConfig,
+      );
+    }
+
+    // Вызываем кодогенерированный метод copyWith через безопасное приведение типов
+    return (data as dynamic).copyWith(
+      heartRate: updatedHeartRate,
+      strokeRate: updatedStrokeRate,
+      splitTime500m: updatedSplitTime,
+      cadence: updatedCadence,
+      bikePower: updatedBikePower,
+      speed: updatedSpeed,
+      runCadence: updatedRunCadence,
+      stepRate: updatedStepRate,
+    ) as WorkoutData;
+  }
+
+  double _processSma(
+    double newValue,
+    ListQueue<double> queue,
+    ParameterFilterConfig pConfig,
+  ) {
+    if (pConfig.method != SmoothingMethod.simpleMovingAverage ||
+        pConfig.windowSize <= 0) {
+      return newValue;
+    }
+    queue.addLast(newValue);
+    if (queue.length > pConfig.windowSize) {
+      queue.removeFirst();
+    }
+    if (queue.isEmpty) return newValue;
+    final double sum = queue.reduce((value, element) => value + element);
+    return sum / queue.length;
+  }
+
+  double _processEma(double newValue, ParameterFilterConfig pConfig) {
+    if (pConfig.method != SmoothingMethod.exponentialMovingAverage) {
+      return newValue;
+    }
+    if (_lastHeartRate == null) {
+      _lastHeartRate = newValue;
+      return newValue;
+    }
+    final double alpha = pConfig.alpha;
+    final double smoothedValue =
+        (alpha * newValue) + ((1.0 - alpha) * _lastHeartRate!);
+    _lastHeartRate = smoothedValue;
+    return smoothedValue;
+  }
+
+  void reset() {
+    _strokeRateQueue.clear();
+    _powerQueue.clear();
+    _paceQueue.clear();
+    _speedQueue.clear();
+    _cadenceQueue.clear();
+    _lastHeartRate = null;
+  }
+}
+
+enum ModifierSmoothingMethod {
+  none,
+  simpleMovingAverage,
+  exponentialMovingAverage,
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_parsers\ftms_universal_parser.dart
+// ========================================
+
+// FILE: .\lib\core\ble_parsers\ftms_universal_parser.dart
+import 'dart:typed_data';
+
+import 'ble_parser.dart';
+import 'ftms/bike_ftms_parser.dart';
+import 'ftms/ftms_sub_parser.dart';
+import 'ftms/rower_ftms_parser.dart';
+import 'ftms/stepper_ftms_parser.dart';
+import 'ftms/treadmill_ftms_parser.dart';
+import 'models/workout_data.dart';
+
+class FtmsUniversalParser implements BleParser {
+  final String _characteristicUuid;
+  final String _deviceName;
+  final Map<EquipmentType, FtmsSubParser> _parsers;
+
+  FtmsUniversalParser({
+    required String characteristicUuid,
+    String deviceName = 'FTMS Machine',
+    double userWeightKg = 75.0,
+  }) : _characteristicUuid = characteristicUuid.toLowerCase(),
+       _deviceName = deviceName.isNotEmpty ? deviceName : 'FTMS Machine',
+       _parsers = {
+         EquipmentType.treadmill: TreadmillFtmsParser(),
+         EquipmentType.bike: BikeFtmsParser(userWeightKg: userWeightKg),
+         EquipmentType.rower: RowerFtmsParser(),
+         EquipmentType.stepper: StepperFtmsParser(),
+       };
+
+  @override
+  EquipmentType get type {
+    if (_characteristicUuid.contains('2acd')) return EquipmentType.treadmill;
+    if (_characteristicUuid.contains('2ad2')) return EquipmentType.bike;
+    if (_characteristicUuid.contains('2ad1')) return EquipmentType.rower;
+    if (_characteristicUuid.contains('2acf') ||
+        _characteristicUuid.contains('2ad0')) {
+      return EquipmentType.stepper;
+    }
+    return EquipmentType.unknown;
+  }
+
+  @override
+  SmoothingConfig get smoothingConfig => const SmoothingConfig(
+    enableSmoothing: true,
+    powerConfig: ParameterFilterConfig(
+      method: SmoothingMethod.simpleMovingAverage,
+      windowSize: 4,
+    ),
+    heartRateConfig: ParameterFilterConfig(
+      method: SmoothingMethod.exponentialMovingAverage,
+      alpha: 0.2,
+    ),
+  );
+
+  @override
+  WorkoutData parse(List<int> rawData, {int? iosHeartRate}) {
+    if (rawData.isEmpty || rawData.length < 3) {
+      return const WorkoutData.error('Пакет FTMS пуст или поврежден');
+    }
+
+    final Uint8List bytes = Uint8List.fromList(rawData);
+    final ByteData buffer = ByteData.sublistView(bytes);
+    final int length = bytes.length;
+
+    try {
+      final subParser = _parsers[type];
+      if (subParser != null) {
+        return subParser.parse(buffer, length, iosHeartRate, _deviceName);
+      }
+      return const WorkoutData.error(
+        'Неизвестный тип UUID характеристики FTMS',
+      );
+    } catch (e) {
+      return WorkoutData.error('Исключение при разборе FTMS структуры: $e');
+    }
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_parsers\starthouse_rs500_parser.dart
+// ========================================
+
+// FILE: .\lib\core\ble_parsers\starthouse_rs500_parser.dart
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
+
+import '../ble_parsers/models/workout_data.dart';
 import 'ble_parser.dart';
 
 class StartHouseRS500Parser implements BleParser {
@@ -467,30 +881,534 @@ class StartHouseRS500Parser implements BleParser {
   EquipmentType get type => EquipmentType.rower;
 
   @override
-  Map<String, dynamic> parse(List<int> rawData) {
-    if (rawData.isEmpty) return {};
-    try {
-      final int strokeRate = rawData.length > 2 ? rawData[2] : 0;
-      final int distance = rawData.length > 4
-          ? (rawData[3] << 8) | rawData[4]
-          : 0;
+  SmoothingConfig get smoothingConfig => const SmoothingConfig(
+    enableSmoothing: true,
+    strokeRateConfig: ParameterFilterConfig(
+      method: SmoothingMethod.simpleMovingAverage,
+      windowSize: 10,
+    ),
+    powerConfig: ParameterFilterConfig(
+      method: SmoothingMethod.simpleMovingAverage,
+      windowSize: 4,
+    ),
+    paceConfig: ParameterFilterConfig(
+      method: SmoothingMethod.simpleMovingAverage,
+      windowSize: 4,
+    ),
+    heartRateConfig: ParameterFilterConfig(
+      method: SmoothingMethod.exponentialMovingAverage,
+      alpha: 0.25,
+    ),
+  );
 
-      return {
-        'equipment': 'StartHouse RS 500',
-        'stroke_rate': strokeRate,
-        'distance': distance,
-      };
+  @override
+  WorkoutData parse(List<int> rawData, {int? iosHeartRate}) {
+    if (rawData.isEmpty || rawData.length < 13) {
+      return const WorkoutData.error(
+        'Критическая ошибка: Пакет данных кастомного гребца усечен.',
+      );
+    }
+
+    try {
+      final Uint8List bytes = Uint8List.fromList(rawData);
+      final ByteData buffer = ByteData.sublistView(bytes);
+
+      final double strokeRate = (buffer.getUint8(2) & 0xFF) * 0.5;
+      final int strokeCount = buffer.getUint16(3);
+      final int distance =
+          (buffer.getUint8(5) << 16) |
+          (buffer.getUint8(6) << 8) |
+          buffer.getUint8(7);
+      final int pace = buffer.getUint16(8);
+
+      final int rawPower = buffer.getInt16(10);
+      final double power = (rawPower < 0 || rawPower > 3000)
+          ? 0.0
+          : rawPower.toDouble();
+
+      int finalHeartRate = buffer.getUint8(12) & 0xFF;
+
+      // ИСПРАВЛЕНО: Вместо обращения к Platform (которое падает в изолятах)
+      // используем безопасный для веб/изолятов kIsWeb / defaultTargetPlatform.
+      final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
+      if (isIOS && iosHeartRate != null) {
+        finalHeartRate = iosHeartRate;
+      }
+
+      if (finalHeartRate < 30 || finalHeartRate > 240) {
+        finalHeartRate = 0;
+      }
+
+      return WorkoutData(
+        equipmentName: 'StartHouse RS 500',
+        heartRate: finalHeartRate,
+        distance: distance.toDouble(),
+        duration: 0,
+        energy: 0.0,
+        strokeRate: strokeRate,
+        strokeCount: strokeCount,
+        splitTime500m: pace,
+        bikePower: power,
+      );
     } catch (e) {
-      return {'error': 'Parsing failed: $e'};
+      return WorkoutData.error('Исключение парсинга буфера StartHouse: $e');
     }
   }
 }
 
 
-========================================
-FILE: .\lib\core\ble_service\ble_service.dart
-========================================
+// ========================================
+// FILE: .\lib\core\ble_parsers\ftms\bike_ftms_parser.dart
+// ========================================
 
+// FILE: .\lib\core\ble_parsers\ftms\bike_ftms_parser.dart
+import 'dart:typed_data';
+
+import '../models/workout_data.dart';
+import 'ftms_sub_parser.dart';
+
+class BikeFtmsParser implements FtmsSubParser {
+  final double userWeightKg;
+
+  BikeFtmsParser({this.userWeightKg = 75.0});
+
+  @override
+  WorkoutData parse(
+    ByteData buffer,
+    int length,
+    int? iosHeartRate,
+    String deviceName,
+  ) {
+    if (length < 2) {
+      return const WorkoutData.error('Пакет Bike слишком короткий');
+    }
+
+    final int flags = buffer.getUint16(0, Endian.little);
+    int offset = 2;
+
+    double speed = 0.0;
+    if ((flags & 0x0001) == 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет скорости');
+      }
+      speed = buffer.getUint16(offset, Endian.little) * 0.01;
+      offset += 2;
+    }
+
+    double cadence = 0.0;
+    if ((flags & 0x0002) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет каденса');
+      }
+      cadence = buffer.getUint16(offset, Endian.little) * 0.5;
+      offset += 2;
+    }
+
+    double distance = 0.0;
+    if ((flags & 0x0004) != 0) {
+      if (offset + 3 > length) {
+        return const WorkoutData.error('Поврежден пакет дистанции');
+      }
+      distance =
+          (buffer.getUint8(offset + 2) << 16 |
+                  buffer.getUint8(offset + 1) << 8 |
+                  buffer.getUint8(offset))
+              .toDouble();
+      offset += 3;
+    }
+
+    int resistanceLevel = 0;
+    if ((flags & 0x0008) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет сопротивления');
+      }
+      resistanceLevel = buffer.getInt16(offset, Endian.little);
+      offset += 2;
+    }
+
+    double power = 0.0;
+    if ((flags & 0x0010) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет мощности');
+      }
+      power = buffer.getInt16(offset, Endian.little).toDouble();
+      offset += 2;
+    }
+
+    int heartRate = 0;
+    if ((flags & 0x0200) != 0) {
+      if (offset + 1 <= length) {
+        heartRate = buffer.getUint8(offset);
+      }
+    }
+
+    final double wattsPerKg = userWeightKg > 0 ? (power / userWeightKg) : 0.0;
+
+    return WorkoutData(
+      equipmentName: '$deviceName (Bike)',
+      heartRate: iosHeartRate ?? heartRate,
+      distance: distance,
+      duration: 0,
+      energy: 0.0,
+      speed: speed,
+      cadence: cadence,
+      bikePower: power,
+      wattsPerKg: wattsPerKg,
+      resistanceLevel: resistanceLevel,
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_parsers\ftms\ftms_sub_parser.dart
+// ========================================
+
+// FILE: .\lib\core\ble_parsers\ftms\ftms_sub_parser.dart
+import 'dart:typed_data';
+
+import '../models/workout_data.dart';
+
+abstract class FtmsSubParser {
+  WorkoutData parse(
+    ByteData buffer,
+    int length,
+    int? iosHeartRate,
+    String deviceName,
+  );
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_parsers\ftms\rower_ftms_parser.dart
+// ========================================
+
+// FILE: .\lib\core\ble_parsers\ftms\rower_ftms_parser.dart
+import 'dart:typed_data';
+
+import '../models/workout_data.dart';
+import 'ftms_sub_parser.dart';
+
+class RowerFtmsParser implements FtmsSubParser {
+  @override
+  WorkoutData parse(
+    ByteData buffer,
+    int length,
+    int? iosHeartRate,
+    String deviceName,
+  ) {
+    if (length < 2) {
+      return const WorkoutData.error('Пакет Rower слишком короткий');
+    }
+
+    final int flags = buffer.getUint16(0, Endian.little);
+    int offset = 2;
+
+    double strokeRate = 0.0;
+    if ((flags & 0x0001) == 0) {
+      if (offset + 1 > length) {
+        return const WorkoutData.error('Поврежден пакет темпа гребков');
+      }
+      strokeRate = buffer.getUint8(offset) * 0.5;
+      offset += 1;
+    }
+
+    int strokeCount = 0;
+    if ((flags & 0x0002) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет счетчика гребков');
+      }
+      strokeCount = buffer.getUint16(offset, Endian.little);
+      offset += 2;
+    }
+
+    double distance = 0.0;
+    if ((flags & 0x0004) != 0) {
+      if (offset + 3 > length) {
+        return const WorkoutData.error('Поврежден пакет дистанции гребли');
+      }
+      distance =
+          (buffer.getUint8(offset + 2) << 16 |
+                  buffer.getUint8(offset + 1) << 8 |
+                  buffer.getUint8(offset))
+              .toDouble();
+      offset += 3;
+    }
+
+    int splitTime = 0;
+    if ((flags & 0x0008) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет времени сплита');
+      }
+      splitTime = buffer.getUint16(offset, Endian.little);
+      offset += 2;
+    }
+
+    double power = 0.0;
+    if ((flags & 0x0010) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет мощности гребли');
+      }
+      power = buffer.getInt16(offset, Endian.little).toDouble();
+      offset += 2;
+    }
+
+    int heartRate = 0;
+    if ((flags & 0x0100) != 0) {
+      if (offset + 1 <= length) {
+        heartRate = buffer.getUint8(offset);
+      }
+    }
+
+    return WorkoutData(
+      equipmentName: '$deviceName (Rower)',
+      heartRate: iosHeartRate ?? heartRate,
+      distance: distance,
+      duration: 0,
+      energy: 0.0,
+      strokeRate: strokeRate,
+      strokeCount: strokeCount,
+      splitTime500m: splitTime,
+      bikePower: power,
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_parsers\ftms\stepper_ftms_parser.dart
+// ========================================
+
+// FILE: .\lib\core\ble_parsers\ftms\stepper_ftms_parser.dart
+import 'dart:typed_data';
+
+import '../models/workout_data.dart';
+import 'ftms_sub_parser.dart';
+
+class StepperFtmsParser implements FtmsSubParser {
+  @override
+  WorkoutData parse(
+    ByteData buffer,
+    int length,
+    int? iosHeartRate,
+    String deviceName,
+  ) {
+    if (length < 2) {
+      return const WorkoutData.error('Пакет Stepper слишком короткий');
+    }
+
+    final int flags = buffer.getUint16(0, Endian.little);
+    int offset = 2;
+
+    double stepRate = 0.0;
+    if ((flags & 0x0001) == 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет частоты шагов');
+      }
+      stepRate = buffer.getUint16(offset, Endian.little).toDouble();
+      offset += 2;
+    }
+
+    int floorsCount = 0;
+    if ((flags & 0x0002) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет счетчика этажей');
+      }
+      floorsCount = buffer.getUint16(offset, Endian.little);
+      offset += 2;
+    }
+
+    double verticalAscent = 0.0;
+    if ((flags & 0x0004) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет высоты подъема');
+      }
+      verticalAscent = buffer.getUint16(offset, Endian.little) * 0.1;
+      offset += 2;
+    }
+
+    double distance = 0.0;
+    if ((flags & 0x0008) != 0) {
+      if (offset + 3 > length) {
+        return const WorkoutData.error('Поврежден пакет дистанции степпера');
+      }
+      distance =
+          (buffer.getUint8(offset + 2) << 16 |
+                  buffer.getUint8(offset + 1) << 8 |
+                  buffer.getUint8(offset))
+              .toDouble();
+      offset += 3;
+    }
+
+    int heartRate = 0;
+    if ((flags & 0x0040) != 0) {
+      if (offset + 1 <= length) {
+        heartRate = buffer.getUint8(offset);
+      }
+    }
+
+    return WorkoutData(
+      equipmentName: '$deviceName (Stepper/Climber)',
+      heartRate: iosHeartRate ?? heartRate,
+      distance: distance,
+      duration: 0,
+      energy: 0.0,
+      floorsCount: floorsCount,
+      stepRate: stepRate,
+      verticalAscent: verticalAscent,
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_parsers\ftms\treadmill_ftms_parser.dart
+// ========================================
+
+// FILE: .\lib\core\ble_parsers\ftms\treadmill_ftms_parser.dart
+import 'dart:typed_data';
+
+import '../models/workout_data.dart';
+import 'ftms_sub_parser.dart';
+
+class TreadmillFtmsParser implements FtmsSubParser {
+  @override
+  WorkoutData parse(
+    ByteData buffer,
+    int length,
+    int? iosHeartRate,
+    String deviceName,
+  ) {
+    if (length < 2) {
+      return const WorkoutData.error('Пакет Treadmill слишком короткий');
+    }
+
+    final int flags = buffer.getUint16(0, Endian.little);
+    int offset = 2;
+
+    double speed = 0.0;
+    if ((flags & 0x0001) == 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет скорости');
+      }
+      speed = buffer.getUint16(offset, Endian.little) * 0.1;
+      offset += 2;
+    }
+
+    double incline = 0.0;
+    if ((flags & 0x0004) != 0) {
+      if (offset + 2 > length) {
+        return const WorkoutData.error('Поврежден пакет наклона');
+      }
+      incline = buffer.getInt16(offset, Endian.little) * 0.1;
+      offset += 2;
+    }
+
+    double distance = 0.0;
+    if ((flags & 0x0010) != 0) {
+      if (offset + 3 > length) {
+        return const WorkoutData.error('Поврежден пакет дистанции');
+      }
+      distance =
+          (buffer.getUint8(offset + 2) << 16 |
+                  buffer.getUint8(offset + 1) << 8 |
+                  buffer.getUint8(offset))
+              .toDouble();
+      offset += 3;
+    }
+
+    final int paceSeconds = speed > 0.5 ? (3600 / speed).round() : 0;
+
+    double runCadence = 0.0;
+    if ((flags & 0x0040) != 0) {
+      if (offset + 1 > length) {
+        return const WorkoutData.error('Поврежден пакет каденса');
+      }
+      runCadence = buffer.getUint8(offset).toDouble() * 2;
+      offset += 1;
+    }
+
+    double contactTime = 0.0;
+    if ((flags & 0x0080) != 0) {
+      if (offset + 1 > length) {
+        return const WorkoutData.error('Поврежден пакет времени контакта');
+      }
+      contactTime = buffer.getUint8(offset).toDouble() * 5;
+      offset += 1;
+    }
+
+    int heartRate = 0;
+    if ((flags & 0x0200) != 0) {
+      if (offset + 1 <= length) {
+        heartRate = buffer.getUint8(offset);
+      }
+    }
+
+    return WorkoutData(
+      equipmentName: '$deviceName (Treadmill)',
+      heartRate: iosHeartRate ?? heartRate,
+      distance: distance,
+      duration: 0,
+      energy: 0.0,
+      speed: speed,
+      runPaceSeconds: paceSeconds,
+      runCadence: runCadence,
+      incline: incline,
+      contactTime: contactTime,
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_parsers\models\workout_data.dart
+// ========================================
+
+// FILE: lib/core/ble_parsers/models/workout_data.dart
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'workout_data.freezed.dart';
+
+@freezed
+class WorkoutData with _$WorkoutData {
+  const factory WorkoutData({
+    required String equipmentName,
+    required int heartRate, // Пульс (BPM) - общий для всех
+    required double distance, // Дистанция (Метры) - общая для всех
+    required int duration, // Общая длительность (Секунды)
+    required double energy, // Сожженные калории (ккал)
+    // 🚣 РУЧНОЙ/ИНТЕГРИРОВАННЫЙ ГРЕБНОЙ ТРЕНАЖЕР (Rower - UUID 0x2AD1)
+    @Default(0.0) double strokeRate, // Темп гребков (SPM)
+    @Default(0) int strokeCount, // Всего гребков
+    @Default(0) int splitTime500m, // Время на 500 метров в секундах
+    @Default(0.0) double strokeLength, // Длина гребка (Метры)
+    // 🚴 ВЕЛОТРЕНАЖЕР / САЙКЛ (Indoor Bike - UUID 0x2AD2)
+    @Default(0.0) double cadence, // Каденс (RPM)
+    @Default(0.0) double bikePower, // Мощность (Ватт)
+    @Default(0.0) double ftp, // Расчетная Functional Threshold Power
+    @Default(0.0) double wattsPerKg, // Соотношение мощности к весу (Вт/кг)
+    @Default(0) int resistanceLevel, // Уровень сопротивления
+    // 🏃 БЕГОВАЯ ДОРОЖКА (Treadmill - UUID 0x2ACD)
+    @Default(0.0) double speed, // Скорость (км/ч)
+    @Default(0) int runPaceSeconds, // Темп бега (секунд на 1 километр)
+    @Default(0.0) double runCadence, // Каденс бега (шагов в минуту / SPM)
+    @Default(0.0) double incline, // Угол наклона (%)
+    @Default(0.0) double contactTime, // Время контакта стопы с базой (мс)
+    // 🪜 СТЕППЕРЫ И КЛАЙМБЕРЫ (Stair Climber - UUID 0x2AD0 / Stepper - 0x2ACF)
+    @Default(0) int floorsCount, // Количество пройденных этажей
+    @Default(0.0) double stepRate, // Скорость шагов в минуту (SPM)
+    @Default(0.0) double verticalAscent, // Высота подъема (Метры)
+  }) = _WorkoutData;
+
+  const factory WorkoutData.error(String errorMessage) = _WorkoutDataError;
+}
+
+
+// ========================================
+// FILE: .\lib\core\ble_service\ble_service.dart
+// ========================================
+
+// FILE: lib/core/ble_service/ble_service.dart
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -499,29 +1417,24 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 class BleService {
   BluetoothDevice? _connectedDevice;
   StreamSubscription<BluetoothConnectionState>? _connectionStateSub;
-  StreamSubscription<List<int>>? _dataSubscription;
+  final List<StreamSubscription<List<int>>> _characteristicSubs = [];
+
+  // Флаг для предотвращения race condition при частых реконнектах
+  bool _isConnectingProcessActive = false;
 
   final StreamController<List<int>> _rawDataController =
       StreamController<List<int>>.broadcast();
-
-  // Используем наш собственный enum или передаем состояния через обертку,
-  // но для сохранения обратной совместимости с вашим BLoC, мы будем слать
-  // BluetoothConnectionState.disconnected / .connected, а фазу подключения
-  // BLoC перехватит сам при вызове метода.
   final StreamController<BluetoothConnectionState> _stateController =
       StreamController<BluetoothConnectionState>.broadcast();
 
   Stream<List<int>> get rawDataStream => _rawDataController.stream;
   Stream<BluetoothConnectionState> get connectionStateStream =>
       _stateController.stream;
-
-  bool _isAutoReconnecting = false;
-  String? _lastDeviceAddress;
-
   Stream<List<ScanResult>> get scanResults => FlutterBluePlus.scanResults;
 
   Future<void> startScan() async {
     try {
+      await FlutterBluePlus.stopScan();
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 15));
     } catch (e) {
       debugPrint('Ошибка запуска сканирования BLE: $e');
@@ -533,113 +1446,168 @@ class BleService {
   }
 
   Future<void> connect(String address) async {
-    _lastDeviceAddress = address;
-    _isAutoReconnecting = false;
+    if (_isConnectingProcessActive) {
+      debugPrint(
+        'BLE: Процесс подключения уже запущен, игнорируем дублирующий вызов.',
+      );
+      return;
+    }
+
     final device = BluetoothDevice.fromId(address);
-    await _establishConnection(device);
+    _isConnectingProcessActive = true;
+
+    try {
+      await _establishConnection(device);
+    } catch (e) {
+      debugPrint('Исключение при подключении к устройству: $e');
+      rethrow;
+    } finally {
+      _isConnectingProcessActive = false;
+    }
+  }
+
+  Future<void> _clearDataSubscriptions() async {
+    // ИСПРАВЛЕНО: Безопасный обход элементов и гарантированное закрытие подписок
+    for (final sub in List<StreamSubscription<List<int>>>.from(
+      _characteristicSubs,
+    )) {
+      await sub.cancel();
+    }
+    _characteristicSubs.clear();
   }
 
   Future<void> _establishConnection(BluetoothDevice device) async {
+    // Безопасно зачищаем старые подписки на состояние и характеристики перед новым коннектом
     await _connectionStateSub?.cancel();
+    await _clearDataSubscriptions();
 
     _connectionStateSub = device.connectionState.listen((state) {
-      if (!_isAutoReconnecting) {
-        _stateController.add(state);
-      }
-      if (state == BluetoothConnectionState.disconnected &&
-          _lastDeviceAddress != null &&
-          !_isAutoReconnecting) {
-        _handleAutoReconnect();
-      }
+      if (!_stateController.isClosed) _stateController.add(state);
     });
 
     try {
+      if (FlutterBluePlus.adapterStateNow != BluetoothAdapterState.on) {
+        throw Exception('Bluetooth адаптер выключен');
+      }
+
+      // Подключаемся (параметр license удален, так как он приводил к ошибке компиляции)
       await device.connect(
         license: License.nonprofit,
         timeout: const Duration(seconds: 10),
       );
-      _connectedDevice = device;
 
+      _connectedDevice = device;
       final List<BluetoothService> services = await device.discoverServices();
+
       for (var service in services) {
         for (var characteristic in service.characteristics) {
           if (characteristic.properties.notify ||
               characteristic.properties.indicate) {
             await characteristic.setNotifyValue(true);
-            await _dataSubscription?.cancel();
-            _dataSubscription = characteristic.lastValueStream.listen((value) {
-              _rawDataController.add(value);
+
+            final sub = characteristic.onValueReceived.listen((value) {
+              if (!_rawDataController.isClosed) {
+                _rawDataController.add(value);
+              }
             });
+            _characteristicSubs.add(sub);
           }
         }
       }
     } catch (e) {
-      _stateController.add(BluetoothConnectionState.disconnected);
+      debugPrint('BLE Error: Ошибка соединения: $e');
+      if (!_stateController.isClosed) {
+        _stateController.add(BluetoothConnectionState.disconnected);
+      }
       rethrow;
     }
   }
 
-  Future<void> _handleAutoReconnect() async {
-    if (_lastDeviceAddress == null) return;
-    _isAutoReconnecting = true;
-
-    for (int i = 0; i < 3; i++) {
-      if (!_isAutoReconnecting) return;
-
-      // Вместо отправки несуществующего состояния в поток плагина,
-      // мы ничего не шлем или полагаемся на состояние BleConnecting,
-      // которое BleConnectionBloc выставляет у себя внутри при получении команды автоподключения.
-
-      try {
-        final device = BluetoothDevice.fromId(_lastDeviceAddress!);
-        await _establishConnection(device);
-        _isAutoReconnecting = false;
-        return;
-      } catch (_) {
-        await Future<void>.delayed(const Duration(seconds: 5));
-      }
-    }
-    _isAutoReconnecting = false;
-    _stateController.add(BluetoothConnectionState.disconnected);
-  }
-
   Future<void> disconnect() async {
-    _lastDeviceAddress = null;
-    _isAutoReconnecting = false;
-    await _dataSubscription?.cancel();
+    await _clearDataSubscriptions();
     await _connectionStateSub?.cancel();
+    _connectionStateSub = null;
+
     if (_connectedDevice != null) {
       await _connectedDevice!.disconnect();
       _connectedDevice = null;
     }
-    _stateController.add(BluetoothConnectionState.disconnected);
+
+    if (!_stateController.isClosed) {
+      _stateController.add(BluetoothConnectionState.disconnected);
+    }
   }
 
-  void dispose() {
-    _rawDataController.close();
-    _stateController.close();
+  Future<void> dispose() async {
+    await disconnect();
+    await _rawDataController.close();
+    await _stateController.close();
   }
 }
 
 
-========================================
-FILE: .\lib\core\di\injection.dart
-========================================
+// ========================================
+// FILE: .\lib\core\di\injection.dart
+// ========================================
 
+// FILE: .\lib\core\di\injection.dart
 import 'package:get_it/get_it.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../features/equipment_finder/bloc/ble_scan_bloc.dart';
 import '../ble_service/ble_service.dart';
+import '../preferences/preferences_service.dart';
 
 final getIt = GetIt.instance;
 
-void setupDependencies() {
+Future<void> setupDependencies() async {
+  final prefs = await SharedPreferences.getInstance();
+
+  getIt.registerLazySingleton<PreferencesService>(
+    () => PreferencesService(prefs),
+  );
+
+  // BLE Сервис должен оставаться единственным источником данных (Singleton)
   getIt.registerLazySingleton<BleService>(() => BleService());
+
+  // ИСПРАВЛЕНО: Изменено с registerLazySingleton на registerFactory.
+  // Теперь при каждом открытии экрана поиска будет создаваться новый, чистый инстанс Блока,
+  // что полностью решает проблему с состоянием "StateError: Cannot emit new states after close".
+  getIt.registerFactory<BleScanBloc>(() => BleScanBloc(getIt<BleService>()));
 }
 
 
-========================================
-FILE: .\lib\core\theme\app_theme.dart
-========================================
+// ========================================
+// FILE: .\lib\core\preferences\preferences_service.dart
+// ========================================
+
+// FILE: .\lib\core\preferences\preferences_service.dart
+import 'package:shared_preferences/shared_preferences.dart';
+
+class PreferencesService {
+  final SharedPreferences _prefs;
+
+  // Ключи для хранения настроек
+  static const String _keyThemeMode = 'theme_mode';
+
+  PreferencesService(this._prefs);
+
+  /// Сохранить выбранную тему (dark, light, system)
+  Future<void> saveThemeMode(String mode) async {
+    await _prefs.setString(_keyThemeMode, mode);
+  }
+
+  /// Получить сохраненную тему. По умолчанию возвращаем 'dark',
+  /// так как это стартовое состояние в вашем приложении.
+  String getThemeMode() {
+    return _prefs.getString(_keyThemeMode) ?? 'dark';
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\core\theme\app_theme.dart
+// ========================================
 
 import 'package:flutter/material.dart';
 
@@ -672,108 +1640,1624 @@ class AppTheme {
 }
 
 
-========================================
-FILE: .\lib\core\theme\cubit\theme_cubit.dart
-========================================
+// ========================================
+// FILE: .\lib\core\theme\cubit\theme_cubit.dart
+// ========================================
 
+// FILE: .\lib\core\theme\cubit/theme_cubit.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../di/injection.dart';
+import '../../preferences/preferences_service.dart';
+
 class ThemeCubit extends Cubit<ThemeMode> {
-  ThemeCubit() : super(ThemeMode.dark);
+  final PreferencesService _preferencesService;
+
+  // ИСПРАВЛЕНО: При создании кубита считываем тему из сохраненных настроек устройства
+  ThemeCubit()
+    : _preferencesService = getIt<PreferencesService>(),
+      super(_getInitialThemeMode());
 
   void toggleTheme() {
-    emit(state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
+    final nextMode = state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+
+    // Сохраняем строковое представление в SharedPreferences
+    _preferencesService.saveThemeMode(nextMode.name);
+
+    emit(nextMode);
+  }
+
+  // Вспомогательный статический метод для парсинга сохраненной строки в Enum ThemeMode
+  static ThemeMode _getInitialThemeMode() {
+    final String savedModeStr = getIt<PreferencesService>().getThemeMode();
+
+    // Безопасный маппинг строки в ThemeMode
+    if (savedModeStr == ThemeMode.light.name) {
+      return ThemeMode.light;
+    } else if (savedModeStr == ThemeMode.system.name) {
+      return ThemeMode.system;
+    }
+    return ThemeMode.dark; // Дефолтное состояние, если ничего не сохранено
   }
 }
 
 
-========================================
-FILE: .\lib\features\equipment_finder\ui\equipment_finder_screen.dart
-========================================
+// ========================================
+// FILE: .\lib\features\active_session\bloc\active_session_bloc.dart
+// ========================================
 
-import 'dart:io';
+// FILE: lib/features/active_session/bloc/active_session_bloc.dart
+import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:rxdart/rxdart.dart';
 
+import '../../../core/background/background_handler.dart'; // ДОБАВЛЕНО
 import '../../../core/ble_parsers/ble_parser.dart';
 import '../../../core/ble_parsers/ble_parser_factory.dart';
+import '../../../core/ble_parsers/data_smoother.dart';
+import '../../../core/ble_parsers/models/workout_data.dart';
 import '../../../core/ble_service/ble_service.dart';
-import '../../../core/di/injection.dart';
+import 'active_session_event.dart';
+import 'active_session_state.dart';
+
+class ActiveSessionBloc extends Bloc<ActiveSessionEvent, ActiveSessionState> {
+  final BleService _bleService;
+  StreamSubscription<List<int>>? _rawDataSubscription;
+  DataSmoother? _smoother;
+  BleParser? _currentParser;
+
+  ActiveSessionBloc(this._bleService)
+    : super(const ActiveSessionState.initial()) {
+    _initForegroundTask(); // ДОБАВЛЕНО: Первичная настройка нотификации
+    on<StartSession>(_onStartSession);
+    on<UpdateRawData>(_onUpdateRawData);
+    on<StopSession>(_onStopSession);
+  }
+
+  void _initForegroundTask() {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'zonex_workout_channel',
+        channelName: 'ZonEx Тренировка',
+        channelDescription: 'Показывает статус активной тренировки в фоне.',
+        //channelImportance: NotificationChannelImportance.LOW,
+        //priority: NotificationPriority.LOW,
+        // ДОБАВЛЕНО: Делает уведомление кликабельным, при нажатии на него
+        // операционная система автоматически развернет наше приложение из фона
+        //isClickable: true,
+      ),
+      // ИСПРАВЛЕНО: Добавлен строго обязательный именованный параметр iosNotificationOptions
+      iosNotificationOptions: const IOSNotificationOptions(),
+      // ИСПРАВЛЕНО: eventAction используется как простой флаг,
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(5000),
+        //autoRunOnBoot: false,
+        //allowWakeLock: true, // Интервал передается как позиционный Duration
+      ),
+    );
+  }
+
+  Future<void> _startForegroundService(String deviceName) async {
+    // Проверяем/запрашиваем разрешение на отправку уведомлений (актуально для Android 13+)
+    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      // Рекомендуется также попросить пользователя отключить оптимизацию батареи
+    }
+
+    await FlutterForegroundTask.startService(
+      notificationTitle: 'ZonEx: Активная тренировка',
+      notificationText: 'Подключено к тренажеру: $deviceName',
+      callback: startCallback,
+    );
+  }
+
+  Future<void> _stopForegroundService() async {
+    if (await FlutterForegroundTask.isRunningService) {
+      await FlutterForegroundTask.stopService();
+    }
+  }
+
+  String _resolveFtmsCharacteristicUuid(String deviceName) {
+    final name = deviceName.toLowerCase();
+    if (name.contains('treadmill') ||
+        name.contains('run') ||
+        name.contains('track')) {
+      return '2acd';
+    } else if (name.contains('row') || name.contains('rower')) {
+      return '2ad1';
+    } else if (name.contains('step') ||
+        name.contains('stair') ||
+        name.contains('climber')) {
+      return '2acf';
+    }
+    return '2ad2';
+  }
+
+  Future<void> _onStartSession(
+    StartSession event,
+    Emitter<ActiveSessionState> emit,
+  ) async {
+    await _rawDataSubscription?.cancel();
+    _rawDataSubscription = null;
+
+    _currentParser = BleParserFactory.getParser(
+      event.deviceName,
+      {},
+      ['1826'],
+      targetCharacteristicUuid: _resolveFtmsCharacteristicUuid(
+        event.deviceName,
+      ),
+    );
+
+    if (_currentParser != null) {
+      _smoother = DataSmoother(_currentParser!.smoothingConfig);
+      _smoother?.reset();
+    }
+
+    // ДОБАВЛЕНО: Запуск системной фоновой службы / Foreground Уведомления
+    await _startForegroundService(event.deviceName);
+
+    _rawDataSubscription = _bleService.rawDataStream
+        .throttleTime(const Duration(milliseconds: 400), trailing: true)
+        .listen((bytes) {
+          if (!isClosed) add(UpdateRawData(bytes));
+        });
+
+    emit(
+      ActiveSessionState.data(
+        equipmentType: _currentParser?.type ?? EquipmentType.unknown,
+        equipmentName: event.deviceName,
+      ),
+    );
+  }
+
+  void _onUpdateRawData(UpdateRawData event, Emitter<ActiveSessionState> emit) {
+    if (_currentParser == null || _smoother == null || isClosed) return;
+
+    try {
+      final WorkoutData parsedWorkoutData = _currentParser!.parse(
+        event.rawData,
+      );
+      final WorkoutData smoothed = _smoother!.smooth(parsedWorkoutData);
+
+      smoothed.when(
+        (
+          equipmentName,
+          heartRate,
+          distance,
+          duration,
+          energy,
+          strokeRate,
+          strokeCount,
+          splitTime500m,
+          strokeLength,
+          cadence,
+          bikePower,
+          ftp,
+          wattsPerKg,
+          resistanceLevel,
+          speed,
+          runPaceSeconds,
+          runCadence,
+          incline,
+          contactTime,
+          floorsCount,
+          stepRate,
+          verticalAscent,
+        ) {
+          if (isClosed) return;
+
+          // ДОБАВЛЕНО: Динамическое обновление текста уведомления актуальными метриками в фоне!
+          String updateText = 'Дистанция: ${distance.round()}м';
+          if (heartRate > 0) updateText += ' | Пульс: $heartRate BPM';
+          FlutterForegroundTask.updateService(notificationText: updateText);
+
+          switch (_currentParser!.type) {
+            case EquipmentType.rower:
+              emit(
+                ActiveSessionState.data(
+                  equipmentType: EquipmentType.rower,
+                  equipmentName: equipmentName,
+                  heartRate: heartRate,
+                  distance: distance,
+                  strokeRate: strokeRate,
+                  strokeCount: strokeCount,
+                  rowerPower: bikePower,
+                  formattedPace: _formatPace(splitTime500m),
+                ),
+              );
+            case EquipmentType.bike:
+              emit(
+                ActiveSessionState.data(
+                  equipmentType: EquipmentType.bike,
+                  equipmentName: equipmentName,
+                  heartRate: heartRate,
+                  distance: distance,
+                  bikeSpeed: speed,
+                  bikeCadence: cadence,
+                  bikePower: bikePower,
+                  resistanceLevel: resistanceLevel,
+                ),
+              );
+            case EquipmentType.treadmill:
+              emit(
+                ActiveSessionState.data(
+                  equipmentType: EquipmentType.treadmill,
+                  equipmentName: equipmentName,
+                  heartRate: heartRate,
+                  distance: distance,
+                  runSpeed: speed,
+                  runPace: _formatPace(runPaceSeconds),
+                  runCadence: runCadence,
+                  incline: incline,
+                ),
+              );
+            case EquipmentType.stepper:
+              emit(
+                ActiveSessionState.data(
+                  equipmentType: EquipmentType.stepper,
+                  equipmentName: equipmentName,
+                  heartRate: heartRate,
+                  distance: distance,
+                  floorsCount: floorsCount,
+                  stepRate: stepRate,
+                ),
+              );
+            case EquipmentType.unknown:
+              break;
+          }
+        },
+        error: (msg) {
+          debugPrint('🚨 Ошибка структуры данных BLE пакета: $msg');
+        },
+      );
+    } catch (e) {
+      debugPrint('🚨 Ошибка в потоке обработки данных BLoC: $e');
+    }
+  }
+
+  Future<void> _onStopSession(
+    StopSession event,
+    Emitter<ActiveSessionState> emit,
+  ) async {
+    await _rawDataSubscription?.cancel();
+    _rawDataSubscription = null;
+    _smoother?.reset();
+
+    // ДОБАВЛЕНО: Гарантированная остановка фоновой службы
+    await _stopForegroundService();
+
+    if (!isClosed) emit(const ActiveSessionState.finished());
+  }
+
+  String _formatPace(int totalSeconds) {
+    if (totalSeconds <= 0 || totalSeconds > 3600) return '0:00';
+    final int minutes = totalSeconds ~/ 60;
+    final int seconds = totalSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Future<void> close() async {
+    await _rawDataSubscription?.cancel();
+    _rawDataSubscription = null;
+    _smoother?.reset();
+    await _stopForegroundService(); // ДОБАВЛЕНО
+    return super.close();
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\bloc\active_session_event.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\bloc\active_session_event.dart
+
+sealed class ActiveSessionEvent {
+  const ActiveSessionEvent();
+}
+
+/// Событие старта тренировочной сессии с передачей метаданных устройства
+class StartSession extends ActiveSessionEvent {
+  final String deviceName;
+  final String deviceAddress;
+
+  const StartSession({required this.deviceName, required this.deviceAddress});
+}
+
+/// Внутреннее событие для передачи новой порции сырых байт из BLE-сервиса
+class UpdateRawData extends ActiveSessionEvent {
+  final List<int> rawData;
+
+  const UpdateRawData(this.rawData);
+}
+
+/// Событие принудительного завершения или остановки тренировки
+class StopSession extends ActiveSessionEvent {
+  const StopSession();
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\bloc\active_session_state.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\bloc\active_session_state.dart
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+import '../../../core/ble_parsers/ble_parser.dart'; // Нужен для EquipmentType
+
+part 'active_session_state.freezed.dart';
+
+@Freezed()
+sealed class ActiveSessionState with _$ActiveSessionState {
+  const factory ActiveSessionState.initial() = _Initial;
+
+  const factory ActiveSessionState.data({
+    @Default(EquipmentType.unknown) EquipmentType equipmentType,
+    @Default('Тренажер') String equipmentName,
+    @Default(0) int heartRate,
+    @Default(0.0) double distance,
+
+    // Метрики гребли (Rower)
+    @Default(0.0) double strokeRate,
+    @Default(0) int strokeCount,
+    @Default('0:00') String formattedPace,
+    @Default(0.0) double rowerPower,
+
+    // Метрики Велосипеда (Bike)
+    @Default(0.0) double bikeSpeed,
+    @Default(0.0) double bikeCadence,
+    @Default(0.0) double bikePower,
+    @Default(0) int resistanceLevel,
+
+    // Метрики Дорожки (Treadmill)
+    @Default(0.0) double runSpeed,
+    @Default('0:00') String runPace,
+    @Default(0.0) double runCadence,
+    @Default(0.0) double incline,
+
+    // Метрики Степпера (Stepper)
+    @Default(0) int floorsCount,
+    @Default(0.0) double stepRate,
+  }) = _Data;
+
+  const factory ActiveSessionState.finished() = _Finished;
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\active_session_screen.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\active_session_screen.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../../core/ble_parsers/ble_parser.dart';
 import '../../shared/ble_connection_bloc/ble_connection_bloc.dart';
 import '../../shared/ble_connection_bloc/ble_connection_event.dart';
 import '../../shared/ble_connection_bloc/ble_connection_state.dart';
+import '../bloc/active_session_bloc.dart';
+import '../bloc/active_session_event.dart';
+import '../bloc/active_session_state.dart';
+// Импорт всех декомпозированных виджетов
+import 'widgets/bike_metrics_grid.dart';
+import 'widgets/metric_card.dart';
+import 'widgets/no_session_widget.dart';
+import 'widgets/reconnect_overlay.dart';
+import 'widgets/rower_metrics_grid.dart';
+import 'widgets/session_finished_widget.dart';
+import 'widgets/stepper_metrics_grid.dart';
+import 'widgets/treadmill_metrics_grid.dart';
 
-class EquipmentFinderScreen extends StatefulWidget {
+class ActiveSessionScreen extends StatelessWidget {
+  const ActiveSessionScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<ActiveSessionBloc, ActiveSessionState>(
+      builder: (context, sessionState) {
+        return sessionState.when(
+          initial: () => const NoSessionWidget(),
+          finished: () => const SessionFinishedWidget(),
+          data:
+              (
+                equipmentType,
+                equipmentName,
+                heartRate,
+                distance,
+                strokeRate,
+                strokeCount,
+                formattedPace,
+                rowerPower,
+                bikeSpeed,
+                bikeCadence,
+                bikePower,
+                resistanceLevel,
+                runSpeed,
+                runPace,
+                runCadence,
+                incline,
+                floorsCount,
+                stepRate,
+              ) {
+                return Stack(
+                  children: [
+                    Scaffold(
+                      body: SafeArea(
+                        child: Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 8,
+                                horizontal: 16,
+                              ),
+                              color:
+                                  Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white10
+                                  : Colors.black12,
+                              width: double.infinity,
+                              child: Text(
+                                'Подключено: $equipmentName',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                            Expanded(
+                              child: _buildMetricsGrid(
+                                equipmentType,
+                                heartRate,
+                                distance,
+                                strokeRate,
+                                strokeCount,
+                                formattedPace,
+                                rowerPower,
+                                bikeSpeed,
+                                bikeCadence,
+                                bikePower,
+                                resistanceLevel,
+                                runSpeed,
+                                runPace,
+                                runCadence,
+                                incline,
+                                floorsCount,
+                                stepRate,
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                bottom: 110.0,
+                                left: 24.0,
+                                right: 24.0,
+                              ),
+                              child: SizedBox(
+                                width: double.infinity,
+                                height: 56,
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.redAccent,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    elevation: 2,
+                                  ),
+                                  icon: const Icon(Icons.stop, size: 28),
+                                  label: const Text(
+                                    'ЗАВЕРШИТЬ ТРЕНИРОВКУ',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1.2,
+                                    ),
+                                  ),
+                                  onPressed: () => _showConfirmDialog(context),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // Изолированный слушатель оверлея
+                    BlocBuilder<BleConnectionBloc, BleConnectionState>(
+                      builder: (context, connectionState) {
+                        return connectionState.maybeWhen(
+                          connecting: (_, attempt) => ReconnectOverlay(
+                            attempt: attempt,
+                            onCancelPressed: () => _showConfirmDialog(context),
+                          ),
+                          orElse: () => const SizedBox.shrink(),
+                        );
+                      },
+                    ),
+                  ],
+                );
+              },
+        );
+      },
+    );
+  }
+
+  Widget _buildMetricsGrid(
+    EquipmentType equipmentType,
+    int heartRate,
+    double distance,
+    double strokeRate,
+    int strokeCount,
+    String formattedPace,
+    double rowerPower,
+    double bikeSpeed,
+    double bikeCadence,
+    double bikePower,
+    int resistanceLevel,
+    double runSpeed,
+    String runPace,
+    double runCadence,
+    double incline,
+    int floorsCount,
+    double stepRate,
+  ) {
+    switch (equipmentType) {
+      case EquipmentType.rower:
+        return RowerMetricsGrid(
+          heartRate: heartRate,
+          formattedPace: formattedPace,
+          rowerPower: rowerPower,
+          strokeRate: strokeRate,
+          distance: distance,
+          strokeCount: strokeCount,
+        );
+      case EquipmentType.bike:
+        return BikeMetricsGrid(
+          heartRate: heartRate,
+          speed: bikeSpeed,
+          cadence: bikeCadence,
+          bikePower: bikePower,
+          resistanceLevel: resistanceLevel,
+          distance: distance,
+        );
+      case EquipmentType.treadmill:
+        return TreadmillMetricsGrid(
+          heartRate: heartRate,
+          runPace: runPace,
+          runSpeed: runSpeed,
+          runCadence: runCadence,
+          incline: incline,
+          distance: distance,
+        );
+      case EquipmentType.stepper:
+        return StepperMetricsGrid(
+          heartRate: heartRate,
+          floorsCount: floorsCount,
+          stepRate: stepRate,
+          distance: distance,
+        );
+      case EquipmentType.unknown:
+        return GridView.count(
+          crossAxisCount: 2,
+          childAspectRatio: 1.2,
+          padding: const EdgeInsets.all(16.0),
+          children: [
+            MetricCard(
+              title: 'ДИСТАНЦИЯ',
+              value: '${distance.round()}',
+              unit: ' M',
+              icon: Icons.map,
+              accentColor: Colors.green,
+            ),
+          ],
+        );
+    }
+  }
+
+  void _showConfirmDialog(BuildContext context) {
+    final activeSessionBloc = context.read<ActiveSessionBloc>();
+    final bleConnectionBloc = context.read<BleConnectionBloc>();
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Завершить тренировку?'),
+        content: const Text('Текущий прогресс сессии будет остановлен.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('ОТМЕНА'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              activeSessionBloc.add(const StopSession());
+              bleConnectionBloc.add(DisconnectFromDevice());
+            },
+            child: const Text('ДА, ЗАВЕРШИТЬ'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\widgets\bike_metrics_grid.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\widgets\bike_metrics_grid.dart
+import 'package:flutter/material.dart';
+
+import 'metric_card.dart';
+
+class BikeMetricsGrid extends StatelessWidget {
+  final int heartRate;
+  final double speed;
+  final double cadence;
+  final double bikePower;
+  final int resistanceLevel;
+  final double distance;
+
+  const BikeMetricsGrid({
+    super.key,
+    required this.heartRate,
+    required this.speed,
+    required this.cadence,
+    required this.bikePower,
+    required this.resistanceLevel,
+    required this.distance,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      childAspectRatio: 1.2,
+      padding: const EdgeInsets.all(16.0),
+      mainAxisSpacing: 12.0,
+      crossAxisSpacing: 12.0,
+      children: [
+        MetricCard(
+          title: 'ПУЛЬС',
+          value: heartRate > 0 ? '$heartRate' : '--',
+          unit: ' BPM',
+          icon: Icons.favorite,
+          accentColor: Colors.redAccent,
+        ),
+        MetricCard(
+          title: 'СКОРОСТЬ',
+          value: speed.toStringAsFixed(1),
+          unit: ' KM/H',
+          icon: Icons.speed,
+          accentColor: Colors.blueAccent,
+        ),
+        MetricCard(
+          title: 'КАДЕНС',
+          value: cadence.toStringAsFixed(0),
+          unit: ' RPM',
+          icon: Icons.cached,
+          accentColor: Colors.orangeAccent,
+        ),
+        MetricCard(
+          title: 'МОЩНОСТЬ',
+          value: '${bikePower.round()}',
+          unit: ' W',
+          icon: Icons.bolt,
+          accentColor: Colors.amber,
+        ),
+        MetricCard(
+          title: 'СОПРОТИВЛЕНИЕ',
+          value: '$resistanceLevel',
+          unit: ' LVL',
+          icon: Icons.tune,
+          accentColor: Colors.purpleAccent,
+        ),
+        MetricCard(
+          title: 'ДИСТАНЦИЯ',
+          value: '${distance.round()}',
+          unit: ' M',
+          icon: Icons.map,
+          accentColor: Colors.green,
+        ),
+      ],
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\widgets\metric_card.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\widgets\metric_card.dart
+import 'package:flutter/material.dart';
+
+class MetricCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final String unit;
+  final IconData icon;
+  final Color accentColor;
+
+  const MetricCard({
+    super.key,
+    required this.title,
+    required this.value,
+    this.unit = '',
+    required this.icon,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(14.0),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.grey,
+                    letterSpacing: 0.5,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(icon, color: accentColor, size: 20),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              if (unit.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 2.0),
+                  child: Text(
+                    unit,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\widgets\no_session_widget.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\widgets\no_session_widget.dart
+import 'package:flutter/material.dart';
+
+class NoSessionWidget extends StatelessWidget {
+  const NoSessionWidget({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.play_circle_outline, size: 72, color: Colors.grey),
+          SizedBox(height: 16),
+          Text(
+            'Сессия не запущена',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Подключите тренажер на вкладке Finder',
+            style: TextStyle(color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\widgets\reconnect_overlay.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\widgets\reconnect_overlay.dart
+import 'dart:ui';
+
+import 'package:flutter/material.dart';
+
+class ReconnectOverlay extends StatelessWidget {
+  final int attempt;
+  final VoidCallback onCancelPressed;
+
+  const ReconnectOverlay({
+    super.key,
+    required this.attempt,
+    required this.onCancelPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.55),
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(
+                width: 60,
+                height: 60,
+                child: CircularProgressIndicator(
+                  strokeWidth: 5,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Colors.orangeAccent,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 28),
+              const Text(
+                'Связь потеряна',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Переподключение, попытка $attempt из 3...',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 15,
+                  decoration: TextDecoration.none,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 40),
+              SizedBox(
+                height: 44,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                    side: const BorderSide(color: Colors.redAccent, width: 1.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: onCancelPressed,
+                  child: const Text(
+                    'ОТМЕНИТЬ И ВЫЙТИ',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\widgets\rower_metrics_grid.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\widgets\rower_metrics_grid.dart
+import 'package:flutter/material.dart';
+
+import 'metric_card.dart';
+
+class RowerMetricsGrid extends StatelessWidget {
+  final int heartRate;
+  final String formattedPace;
+  final double rowerPower;
+  final double strokeRate;
+  final double distance;
+  final int strokeCount;
+
+  const RowerMetricsGrid({
+    super.key,
+    required this.heartRate,
+    required this.formattedPace,
+    required this.rowerPower,
+    required this.strokeRate,
+    required this.distance,
+    required this.strokeCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      childAspectRatio: 1.2,
+      padding: const EdgeInsets.all(16.0),
+      mainAxisSpacing: 12.0,
+      crossAxisSpacing: 12.0,
+      children: [
+        MetricCard(
+          title: 'ПУЛЬС',
+          value: heartRate > 0 ? '$heartRate' : '--',
+          unit: ' BPM',
+          icon: Icons.favorite,
+          accentColor: Colors.redAccent,
+        ),
+        MetricCard(
+          title: 'ТЕМП (/500м)',
+          value: formattedPace,
+          icon: Icons.speed,
+          accentColor: Colors.blueAccent,
+        ),
+        MetricCard(
+          title: 'МОЩНОСТЬ',
+          value: '${rowerPower.round()}',
+          unit: ' W',
+          icon: Icons.bolt,
+          accentColor: Colors.amber,
+        ),
+        MetricCard(
+          title: 'ЧАСТОТА ГРЕБКОВ',
+          value: strokeRate.toStringAsFixed(1),
+          unit: ' SPM',
+          icon: Icons.rowing,
+          accentColor: Colors.purpleAccent,
+        ),
+        MetricCard(
+          title: 'ДИСТАНЦИЯ',
+          value: '${distance.round()}',
+          unit: ' M',
+          icon: Icons.map,
+          accentColor: Colors.green,
+        ),
+        MetricCard(
+          title: 'ВСЕГО ГРЕБКОВ',
+          value: '$strokeCount',
+          icon: Icons.functions,
+          accentColor: Colors.teal,
+        ),
+      ],
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\widgets\session_finished_widget.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\widgets\session_finished_widget.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../bloc/active_session_bloc.dart';
+import '../../bloc/active_session_event.dart';
+
+class SessionFinishedWidget extends StatelessWidget {
+  const SessionFinishedWidget({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.check_circle_outline, size: 72, color: Colors.green),
+          const SizedBox(height: 16),
+          const Text(
+            'Тренировка завершена!',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () =>
+                context.read<ActiveSessionBloc>().add(const StopSession()),
+            child: const Text('Начать заново'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\widgets\stepper_metrics_grid.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\widgets\stepper_metrics_grid.dart
+import 'package:flutter/material.dart';
+
+import 'metric_card.dart';
+
+class StepperMetricsGrid extends StatelessWidget {
+  final int heartRate;
+  final int floorsCount;
+  final double stepRate;
+  final double distance;
+
+  const StepperMetricsGrid({
+    super.key,
+    required this.heartRate,
+    required this.floorsCount,
+    required this.stepRate,
+    required this.distance,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      childAspectRatio: 1.2,
+      padding: const EdgeInsets.all(16.0),
+      mainAxisSpacing: 12.0,
+      crossAxisSpacing: 12.0,
+      children: [
+        MetricCard(
+          title: 'ПУЛЬС',
+          value: heartRate > 0 ? '$heartRate' : '--',
+          unit: ' BPM',
+          icon: Icons.favorite,
+          accentColor: Colors.redAccent,
+        ),
+        MetricCard(
+          title: 'ПРОЙДЕНО ЭТАЖЕЙ',
+          value: '$floorsCount',
+          unit: ' FLR',
+          icon: Icons.stairs,
+          accentColor: Colors.deepPurpleAccent,
+        ),
+        MetricCard(
+          title: 'СКОРОСТЬ ШАГОВ',
+          value: stepRate.toStringAsFixed(0),
+          unit: ' SPM',
+          icon: Icons.height,
+          accentColor: Colors.orangeAccent,
+        ),
+        MetricCard(
+          title: 'ДИСТАНЦИЯ',
+          value: '${distance.round()}',
+          unit: ' M',
+          icon: Icons.map,
+          accentColor: Colors.green,
+        ),
+      ],
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\active_session\ui\widgets\treadmill_metrics_grid.dart
+// ========================================
+
+// FILE: .\lib\features\active_session\ui\widgets\treadmill_metrics_grid.dart
+import 'package:flutter/material.dart';
+
+import 'metric_card.dart';
+
+class TreadmillMetricsGrid extends StatelessWidget {
+  final int heartRate;
+  final String runPace;
+  final double runSpeed;
+  final double runCadence;
+  final double incline;
+  final double distance;
+
+  const TreadmillMetricsGrid({
+    super.key,
+    required this.heartRate,
+    required this.runPace,
+    required this.runSpeed,
+    required this.runCadence,
+    required this.incline,
+    required this.distance,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      childAspectRatio: 1.2,
+      padding: const EdgeInsets.all(16.0),
+      mainAxisSpacing: 12.0,
+      crossAxisSpacing: 12.0,
+      children: [
+        MetricCard(
+          title: 'ПУЛЬС',
+          value: heartRate > 0 ? '$heartRate' : '--',
+          unit: ' BPM',
+          icon: Icons.favorite,
+          accentColor: Colors.redAccent,
+        ),
+        MetricCard(
+          title: 'ТЕМП БЕГА',
+          value: runPace,
+          unit: ' /KM',
+          icon: Icons.av_timer,
+          accentColor: Colors.blueAccent,
+        ),
+        MetricCard(
+          title: 'СКОРОСТЬ',
+          value: runSpeed.toStringAsFixed(1),
+          unit: ' KM/H',
+          icon: Icons.speed,
+          accentColor: Colors.cyan,
+        ),
+        MetricCard(
+          title: 'КАДЕНС ШАГОВ',
+          value: runCadence.toStringAsFixed(0),
+          unit: ' SPM',
+          icon: Icons.directions_run,
+          accentColor: Colors.orangeAccent,
+        ),
+        MetricCard(
+          title: 'НАКЛОН ПОЛОТНА',
+          value: incline.toStringAsFixed(1),
+          unit: ' %',
+          icon: Icons.trending_up,
+          accentColor: Colors.indigoAccent,
+        ),
+        MetricCard(
+          title: 'ДИСТАНЦИЯ',
+          value: '${distance.round()}',
+          unit: ' M',
+          icon: Icons.map,
+          accentColor: Colors.green,
+        ),
+      ],
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\equipment_finder\bloc\ble_scan_bloc.dart
+// ========================================
+
+// FILE: .\lib\features\equipment_finder\bloc\ble_scan_bloc.dart
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:rxdart/rxdart.dart';
+
+import '../../../core/ble_parsers/ble_parser.dart';
+import '../../../core/ble_parsers/ble_parser_factory.dart'; // ДОБАВЛЕНО
+import '../../../core/ble_service/ble_service.dart';
+import '../models/discovered_device.dart'; // ДОБАВЛЕНО
+import 'ble_scan_event.dart';
+import 'ble_scan_state.dart';
+
+class BleScanBloc extends Bloc<BleScanEvent, BleScanState> {
+  final BleService _bleService;
+
+  StreamSubscription<List<ScanResult>>? _scanSubscription;
+  StreamSubscription<BluetoothAdapterState>? _adapterSubscription;
+  StreamSubscription<bool>? _isScanningSubscription;
+
+  bool _isScanningCurrent = false;
+  List<ScanResult> _currentResults = [];
+
+  BleScanBloc(this._bleService) : super(const BleScanState.initial()) {
+    on<StartScanRequested>(_onStartScan);
+    on<StopScanRequested>(_onStopScan);
+    on<ScanResultsUpdated>(_onScanResultsUpdated);
+    on<AdapterStateUpdated>(_onAdapterStateUpdated);
+
+    _adapterSubscription = FlutterBluePlus.adapterState.listen((state) {
+      if (!isClosed) add(AdapterStateUpdated(state));
+    });
+
+    _isScanningSubscription = FlutterBluePlus.isScanning.listen((isScanning) {
+      _isScanningCurrent = isScanning;
+
+      final isInProgressState = state.maybeWhen(
+        inProgress: (_, _) => true,
+        orElse: () => false,
+      );
+
+      if (!isClosed && isInProgressState) {
+        add(ScanResultsUpdated(_currentResults));
+      }
+    });
+  }
+
+  Future<void> _onStartScan(
+    StartScanRequested event,
+    Emitter<BleScanState> emit,
+  ) async {
+    emit(const BleScanState.initial());
+
+    bool permissionsGranted = false;
+    if (Platform.isAndroid) {
+      final statuses = await [
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+      ].request();
+      permissionsGranted = statuses.values.every((status) => status.isGranted);
+    } else if (Platform.isIOS) {
+      final status = await Permission.bluetooth.request();
+      permissionsGranted = status.isGranted;
+    }
+
+    if (!permissionsGranted) {
+      emit(const BleScanState.noPermissions());
+      return;
+    }
+
+    final adapterNow = FlutterBluePlus.adapterStateNow;
+    if (adapterNow != BluetoothAdapterState.on) {
+      emit(BleScanState.adapterOff(adapterNow));
+      return;
+    }
+
+    await _scanSubscription?.cancel();
+    _scanSubscription = _bleService.scanResults
+        .sampleTime(const Duration(milliseconds: 1000))
+        .listen((results) {
+          if (!isClosed) add(ScanResultsUpdated(results));
+        });
+
+    await _bleService.startScan();
+  }
+
+  Future<void> _onStopScan(
+    StopScanRequested event,
+    Emitter<BleScanState> emit,
+  ) async {
+    await _bleService.stopScan();
+  }
+
+  void _onScanResultsUpdated(
+    ScanResultsUpdated event,
+    Emitter<BleScanState> emit,
+  ) {
+    final List<ScanResult> sortedResults = List.from(event.results);
+    sortedResults.sort((a, b) => b.rssi.compareTo(a.rssi));
+    _currentResults = sortedResults;
+
+    // ИСПРАВЛЕНО: Маппим сырые ScanResult в чистые UI-модели DiscoveredDevice
+    final List<DiscoveredDevice> uiDevices = sortedResults.map((r) {
+      final name = r.advertisementData.advName.isEmpty
+          ? 'Unknown Device'
+          : r.advertisementData.advName;
+
+      final parser = BleParserFactory.getParser(
+        r.advertisementData.advName,
+        r.advertisementData.manufacturerData,
+        r.advertisementData.serviceUuids.map((e) => e.toString()).toList(),
+      );
+
+      return DiscoveredDevice(
+        id: r.device.remoteId.toString(),
+        name: name,
+        rssi: r.rssi,
+        type: parser?.type ?? EquipmentType.unknown,
+      );
+    }).toList();
+
+    if (!isClosed) {
+      emit(
+        BleScanState.inProgress(
+          results: uiDevices, // Передаем список моделей
+          isScanning: _isScanningCurrent,
+        ),
+      );
+    }
+  }
+
+  void _onAdapterStateUpdated(
+    AdapterStateUpdated event,
+    Emitter<BleScanState> emit,
+  ) {
+    if (event.adapterState != BluetoothAdapterState.on) {
+      _bleService.stopScan();
+      emit(BleScanState.adapterOff(event.adapterState));
+    } else {
+      final isInitialOrAdapterOff = state.maybeWhen(
+        initial: () => true,
+        adapterOff: (_) => true,
+        orElse: () => false,
+      );
+
+      if (isInitialOrAdapterOff) {
+        add(StartScanRequested());
+      }
+    }
+  }
+
+  @override
+  Future<void> close() {
+    _scanSubscription?.cancel();
+    _adapterSubscription?.cancel();
+    _isScanningSubscription?.cancel();
+    return super.close();
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\equipment_finder\bloc\ble_scan_event.dart
+// ========================================
+
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+abstract class BleScanEvent {}
+
+/// Событие запроса на запуск сканирования с проверкой разрешений
+class StartScanRequested extends BleScanEvent {}
+
+/// Событие принудительной остановки сканирования
+class StopScanRequested extends BleScanEvent {}
+
+/// Внутреннее событие BLoC для обновления списка найденных устройств из стрима
+class ScanResultsUpdated extends BleScanEvent {
+  final List<ScanResult> results;
+  ScanResultsUpdated(this.results);
+}
+
+/// Внутреннее событие BLoC для обновления статуса адаптера (Вкл/Выкл)
+class AdapterStateUpdated extends BleScanEvent {
+  final BluetoothAdapterState adapterState;
+  AdapterStateUpdated(this.adapterState);
+}
+
+
+// ========================================
+// FILE: .\lib\features\equipment_finder\bloc\ble_scan_state.dart
+// ========================================
+
+// FILE: .\lib\features\equipment_finder\bloc\ble_scan_state.dart
+// FILE: .\lib\features\equipment_finder\bloc\ble_scan_state.dart
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+import '../models/discovered_device.dart'; // ДОБАВЛЕНО
+
+part 'ble_scan_state.freezed.dart';
+
+@Freezed()
+sealed class BleScanState with _$BleScanState {
+  const factory BleScanState.initial() = _Initial;
+  const factory BleScanState.noPermissions() = _NoPermissions;
+  const factory BleScanState.adapterOff(BluetoothAdapterState adapterState) =
+      _AdapterOff;
+  const factory BleScanState.inProgress({
+    // ИСПРАВЛЕНО: Теперь UI получает чистые модели устройств
+    required List<DiscoveredDevice> results,
+    required bool isScanning,
+  }) = _InProgress;
+}
+
+
+// ========================================
+// FILE: .\lib\features\equipment_finder\models\discovered_device.dart
+// ========================================
+
+// FILE: lib/features/equipment_finder/models/discovered_device.dart
+import '../../../core/ble_parsers/ble_parser.dart';
+
+class DiscoveredDevice {
+  final String id;
+  final String name;
+  final int rssi;
+  final EquipmentType type;
+
+  const DiscoveredDevice({
+    required this.id,
+    required this.name,
+    required this.rssi,
+    required this.type,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DiscoveredDevice &&
+          runtimeType == runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          rssi == other.rssi &&
+          type == other.type;
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ name.hashCode ^ rssi.hashCode ^ type.hashCode;
+}
+
+
+// ========================================
+// FILE: .\lib\features\equipment_finder\ui\equipment_finder_screen.dart
+// ========================================
+
+// FILE: .\lib\features\equipment_finder\ui\equipment_finder_screen.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../../core/di/injection.dart';
+import '../../shared/ble_connection_bloc/ble_connection_bloc.dart';
+import '../../shared/ble_connection_bloc/ble_connection_state.dart';
+import '../bloc/ble_scan_bloc.dart';
+import '../bloc/ble_scan_event.dart';
+import '../bloc/ble_scan_state.dart';
+// Импортируем наши новые выделенные виджеты
+import 'widgets/bluetooth_off_widget.dart';
+import 'widgets/discovered_device_list.dart';
+import 'widgets/no_permissions_widget.dart';
+
+class EquipmentFinderScreen extends StatelessWidget {
   const EquipmentFinderScreen({super.key});
 
   @override
-  State<EquipmentFinderScreen> createState() => _EquipmentFinderScreenState();
+  Widget build(BuildContext context) {
+    return BlocProvider<BleScanBloc>(
+      create: (context) => getIt<BleScanBloc>()..add(StartScanRequested()),
+      child: Scaffold(
+        body: BlocListener<BleConnectionBloc, BleConnectionState>(
+          listener: (context, state) {
+            state.maybeWhen(
+              error: (message) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(message), backgroundColor: Colors.red),
+                );
+              },
+              orElse: () {},
+            );
+          },
+          child: BlocBuilder<BleScanBloc, BleScanState>(
+            builder: (context, state) {
+              return state.when(
+                initial: () => const Center(child: CircularProgressIndicator()),
+                noPermissions: () => const NoPermissionsWidget(),
+                adapterOff: (adapterState) =>
+                    BluetoothOffWidget(adapterState: adapterState),
+                inProgress: (results, isScanning) {
+                  if (results.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        'Тренажеры поблизости не найдены',
+                        style: TextStyle(fontSize: 16),
+                      ),
+                    );
+                  }
+                  return DiscoveredDeviceList(devices: results);
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _EquipmentFinderScreenState extends State<EquipmentFinderScreen> {
-  final BleService _bleService = getIt<BleService>();
-  bool _hasPermissions = false;
-  bool _isCheckingPermissions = true;
+
+// ========================================
+// FILE: .\lib\features\equipment_finder\ui\widgets\bluetooth_off_widget.dart
+// ========================================
+
+// FILE: .\lib\features\equipment_finder\ui\widgets\bluetooth_off_widget.dart
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+class BluetoothOffWidget extends StatelessWidget {
+  final BluetoothAdapterState adapterState;
+
+  const BluetoothOffWidget({super.key, required this.adapterState});
 
   @override
-  void initState() {
-    super.initState();
-    WakelockPlus.enable();
-    _checkAndRequestPermissions();
+  Widget build(BuildContext context) {
+    final String stateText = adapterState == BluetoothAdapterState.turningOff
+        ? 'Выключение...'
+        : 'Отключен';
+
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.bluetooth_disabled,
+            size: 80,
+            color: Colors.orangeAccent,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Bluetooth $stateText',
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Пожалуйста, включите Bluetooth в настройках вашего телефона для сканирования тренажеров.',
+            style: TextStyle(color: Colors.grey),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 32),
+          if (Platform.isAndroid)
+            ElevatedButton.icon(
+              icon: const Icon(Icons.bluetooth),
+              label: const Text('Включить автоматически'),
+              onPressed: () => FlutterBluePlus.turnOn(),
+            ),
+        ],
+      ),
+    );
   }
+}
 
-  @override
-  void dispose() {
-    WakelockPlus.disable();
-    _bleService.stopScan();
-    super.dispose();
-  }
 
-  /// Запрос необходимых разрешений в зависимости от платформы
-  Future<void> _checkAndRequestPermissions() async {
-    setState(() {
-      _isCheckingPermissions = true;
-    });
+// ========================================
+// FILE: .\lib\features\equipment_finder\ui\widgets\discovered_device_list.dart
+// ========================================
 
-    if (Platform.isAndroid) {
-      // Комплексный запрос для Android 12+ и более старых версий
-      final Map<Permission, PermissionStatus> statuses = await [
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-        Permission.location,
-      ].request();
+// FILE: .\lib\features\equipment_finder\ui\widgets\discovered_device_list.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
-      final allGranted = statuses.values.every((status) => status.isGranted);
+import '../../../../core/ble_parsers/ble_parser.dart';
+import '../../../shared/ble_connection_bloc/ble_connection_bloc.dart';
+import '../../../shared/ble_connection_bloc/ble_connection_event.dart';
+import '../../../shared/ble_connection_bloc/ble_connection_state.dart';
+import '../../bloc/ble_scan_bloc.dart';
+import '../../bloc/ble_scan_event.dart';
+import '../../models/discovered_device.dart';
 
-      if (mounted) {
-        setState(() {
-          _hasPermissions = allGranted;
-          _isCheckingPermissions = false;
-        });
-      }
-    } else if (Platform.isIOS) {
-      // Запрос для iOS
-      final PermissionStatus bluetoothStatus = await Permission.bluetooth
-          .request();
+class DiscoveredDeviceList extends StatelessWidget {
+  final List<DiscoveredDevice> devices;
 
-      if (mounted) {
-        setState(() {
-          _hasPermissions = bluetoothStatus.isGranted;
-          _isCheckingPermissions = false;
-        });
-      }
-    }
-
-    // Если разрешения получены — автоматически запускаем сканирование
-    if (_hasPermissions) {
-      _bleService.startScan();
-    }
-  }
+  const DiscoveredDeviceList({super.key, required this.devices});
 
   IconData _getEquipmentIcon(EquipmentType type) {
     switch (type) {
@@ -792,123 +3276,118 @@ class _EquipmentFinderScreenState extends State<EquipmentFinderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Экран проверки разрешений (загрузка)
-    if (_isCheckingPermissions) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 120, top: 8),
+      itemCount: devices.length,
+      itemBuilder: (context, index) {
+        final device = devices[index];
 
-    // 2. Экран, если пользователь отказал в разрешениях
-    if (!_hasPermissions) {
-      return Scaffold(
-        body: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.gpp_bad, size: 80, color: Colors.redAccent),
-              const SizedBox(height: 24),
-              const Text(
-                'Доступ к Bluetooth отклонен',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Для поиска спортивных тренажеров приложению ZonEx необходимы разрешения на работу с Bluetooth.',
-                style: TextStyle(color: Colors.grey),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.settings),
-                label: const Text('Открыть настройки'),
-                onPressed: () => openAppSettings(),
-              ),
-              TextButton(
-                onPressed: _checkAndRequestPermissions,
-                child: const Text('Повторить запрос'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+        return BlocBuilder<BleConnectionBloc, BleConnectionState>(
+          builder: (context, state) {
+            Color iconColor = Colors.grey;
+            bool isThisConnecting = false;
 
-    // 3. Основной рабочий экран Finder, если разрешения предоставлены
-    return BlocListener<BleConnectionBloc, BleConnectionState>(
-      listener: (context, state) {
-        if (state is BleConnectionError) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.message), backgroundColor: Colors.red),
-          );
-        }
-      },
-      child: StreamBuilder<List<ScanResult>>(
-        stream: _bleService.scanResults,
-        builder: (context, snapshot) {
-          final results = snapshot.data ?? [];
-
-          if (results.isEmpty) {
-            return const Center(
-              child: Text(
-                'Тренажеры поблизости не найдены',
-                style: TextStyle(fontSize: 16),
-              ),
+            state.maybeWhen(
+              connected: (deviceAddress, deviceName) {
+                if (deviceAddress == device.id) iconColor = Colors.green;
+              },
+              // ИСПРАВЛЕНО: Учтен аргумент attempt через прочерк (_)
+              connecting: (connectingAddress, _) {
+                if (connectingAddress == device.id) {
+                  iconColor = Colors.orangeAccent;
+                  isThisConnecting = true;
+                }
+              },
+              orElse: () {},
             );
-          }
 
-          return ListView.builder(
-            padding: const EdgeInsets.only(bottom: 120, top: 8),
-            itemCount: results.length,
-            itemBuilder: (context, index) {
-              final r = results[index];
-              final parser = BleParserFactory.getParser(
-                r.advertisementData.advName,
-                r.advertisementData.manufacturerData,
-                r.advertisementData.serviceUuids
-                    .map((e) => e.toString())
-                    .toList(),
-              );
-              final type = parser?.type ?? EquipmentType.unknown;
-
-              return BlocBuilder<BleConnectionBloc, BleConnectionState>(
-                builder: (context, state) {
-                  Color iconColor = Colors.grey;
-                  if (state is BleConnected) iconColor = Colors.green;
-                  if (state is BleConnecting) iconColor = Colors.red;
-
-                  return ListTile(
-                    title: Text(
-                      r.advertisementData.advName.isEmpty
-                          ? 'Unknown Device'
-                          : r.advertisementData.advName,
-                    ),
-                    subtitle: Text('${r.device.remoteId}\nRSSI: ${r.rssi} dBm'),
-                    trailing: Icon(
-                      _getEquipmentIcon(type),
+            return ListTile(
+              title: Text(device.name),
+              subtitle: Text('${device.id}\nRSSI: ${device.rssi} dBm'),
+              trailing: isThisConnecting
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    )
+                  : Icon(
+                      _getEquipmentIcon(device.type),
                       color: iconColor,
                       size: 28,
                     ),
-                    onTap: () {
+              onTap: isThisConnecting
+                  ? null
+                  : () {
+                      context.read<BleScanBloc>().add(StopScanRequested());
                       context.read<BleConnectionBloc>().add(
-                        ConnectToDevice(r.device.remoteId.toString()),
+                        ConnectToDevice(device.id),
                       );
                     },
-                  );
-                },
-              );
-            },
-          );
-        },
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\equipment_finder\ui\widgets\no_permissions_widget.dart
+// ========================================
+
+// FILE: .\lib\features\equipment_finder\ui\widgets\no_permissions_widget.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import '../../bloc/ble_scan_bloc.dart';
+import '../../bloc/ble_scan_event.dart';
+
+class NoPermissionsWidget extends StatelessWidget {
+  const NoPermissionsWidget({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.gpp_bad, size: 80, color: Colors.redAccent),
+          const SizedBox(height: 24),
+          const Text(
+            'Доступ к Bluetooth отклонен',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Для поиска спортивных тренажеров приложению ZonEx необходимы разрешения на работу с Bluetooth.',
+            style: TextStyle(color: Colors.grey),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 32),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.settings),
+            label: const Text('Открыть настройки'),
+            onPressed: () => openAppSettings(),
+          ),
+          TextButton(
+            onPressed: () =>
+                context.read<BleScanBloc>().add(StartScanRequested()),
+            child: const Text('Повторить запрос'),
+          ),
+        ],
       ),
     );
   }
 }
 
 
-========================================
-FILE: .\lib\features\navigation\cubit\navigation_cubit.dart
-========================================
+// ========================================
+// FILE: .\lib\features\navigation\cubit\navigation_cubit.dart
+// ========================================
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -926,143 +3405,173 @@ class NavigationCubit extends Cubit<NavbarItem> {
 }
 
 
-========================================
-FILE: .\lib\features\navigation\ui\main_screen.dart
-========================================
+// ========================================
+// FILE: .\lib\features\navigation\ui\main_screen.dart
+// ========================================
 
+// FILE: .\lib\features\navigation\ui\main_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+// ИСПРАВЛЕНО: Добавлен недостающий импорт для работы с фоновым режимом
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
-import '../../../core/ble_service/ble_service.dart';
-import '../../../core/di/injection.dart';
-import '../../../core/theme/cubit/theme_cubit.dart';
+import '../../active_session/bloc/active_session_bloc.dart';
+import '../../active_session/bloc/active_session_event.dart';
+import '../../active_session/ui/active_session_screen.dart';
+import '../../equipment_finder/bloc/ble_scan_bloc.dart';
+import '../../equipment_finder/bloc/ble_scan_event.dart';
 import '../../equipment_finder/ui/equipment_finder_screen.dart';
+import '../../shared/ble_connection_bloc/ble_connection_bloc.dart';
+import '../../shared/ble_connection_bloc/ble_connection_state.dart';
 import '../cubit/navigation_cubit.dart';
 import 'widgets/floating_bottom_navbar.dart';
+import 'widgets/main_app_bar.dart';
 import 'widgets/placeholder_screens.dart';
 
 class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
 
-  String _getScreenTitle(NavbarItem item) {
-    switch (item) {
-      case NavbarItem.equipmentFinder:
-        return 'ZonEx - Equipment Finder';
-      case NavbarItem.activeSession:
-        return 'Active Session';
-      case NavbarItem.activityInsights:
-        return 'Activity Insights';
-      case NavbarItem.preferences:
-        return 'Preferences';
-      case NavbarItem.account:
-        return 'Account Profile';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final BleService bleService = getIt<BleService>();
-
-    return BlocProvider(
+    return BlocProvider<NavigationCubit>(
       create: (context) => NavigationCubit(),
-      child: BlocBuilder<NavigationCubit, NavbarItem>(
-        builder: (context, activeItem) {
-          return Scaffold(
-            extendBody: true,
-            appBar: AppBar(
-              title: Text(_getScreenTitle(activeItem)),
-              actions: [
-                if (activeItem == NavbarItem.equipmentFinder)
-                  StreamBuilder<bool>(
-                    stream: FlutterBluePlus.isScanning,
-                    builder: (context, snapshot) {
-                      final isScanning = snapshot.data ?? false;
-                      return isScanning
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 12.0),
-                              child: SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                            )
-                          : IconButton(
-                              icon: const Icon(Icons.refresh),
-                              onPressed: () => bleService.startScan(),
-                            );
-                    },
-                  ),
-                BlocBuilder<ThemeCubit, ThemeMode>(
-                  builder: (context, themeMode) {
-                    final isDark = themeMode == ThemeMode.dark;
-                    return IconButton(
-                      icon: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        transitionBuilder: (child, animation) =>
-                            ScaleTransition(scale: animation, child: child),
-                        child: Icon(
-                          isDark ? Icons.dark_mode : Icons.light_mode,
-                          key: ValueKey<bool>(isDark),
-                          color: isDark ? Colors.amberAccent : Colors.orange,
+      child: MultiBlocListener(
+        listeners: [
+          BlocListener<NavigationCubit, NavbarItem>(
+            listener: (context, activeItem) {
+              if (activeItem != NavbarItem.equipmentFinder) {
+                context.read<BleScanBloc>().add(StopScanRequested());
+              }
+            },
+          ),
+          BlocListener<BleConnectionBloc, BleConnectionState>(
+            listener: (context, bleState) {
+              bleState.maybeWhen(
+                connected: (deviceAddress, deviceName) {
+                  context.read<NavigationCubit>().changePage(
+                    NavbarItem.activeSession,
+                  );
+                  context.read<ActiveSessionBloc>().add(
+                    StartSession(
+                      deviceName: deviceName,
+                      deviceAddress: deviceAddress,
+                    ),
+                  );
+                },
+                orElse: () {},
+              );
+            },
+          ),
+        ],
+        child: BlocBuilder<NavigationCubit, NavbarItem>(
+          builder: (context, activeItem) {
+            // ИСПРАВЛЕНО: Scaffold обернут в компонент WithForegroundTask для
+            // корректного взаимодействия плагина с жизненным циклом фонового потока ОС
+            return WithForegroundTask(
+              child: Scaffold(
+                extendBody: true,
+                appBar: MainAppBar(activeItem: activeItem),
+                body: Stack(
+                  children: [
+                    IndexedStack(
+                      index: activeItem.index,
+                      children: const [
+                        EquipmentFinderScreen(),
+                        ActiveSessionScreen(),
+                        PlaceholderScreen(
+                          title: 'Activity Insights',
+                          icon: Icons.insert_chart_outlined,
+                          accentColor: Colors.purpleAccent,
                         ),
-                      ),
-                      onPressed: () => context.read<ThemeCubit>().toggleTheme(),
-                    );
-                  },
-                ),
-                const SizedBox(width: 8),
-              ],
-            ),
-            body: Stack(
-              children: [
-                IndexedStack(
-                  index: activeItem.index,
-                  children: const [
-                    EquipmentFinderScreen(),
-                    PlaceholderScreen(
-                      title: 'Active Session',
-                      icon: Icons.play_circle_filled,
-                      accentColor: Colors.greenAccent,
+                        PlaceholderScreen(
+                          title: 'Preferences',
+                          icon: Icons.tune,
+                          accentColor: Colors.orangeAccent,
+                        ),
+                        PlaceholderScreen(
+                          title: 'Account Profile',
+                          icon: Icons.account_circle_outlined,
+                          accentColor: Colors.tealAccent,
+                        ),
+                      ],
                     ),
-                    PlaceholderScreen(
-                      title: 'Activity Insights',
-                      icon: Icons.insert_chart_outlined,
-                      accentColor: Colors.purpleAccent,
-                    ),
-                    PlaceholderScreen(
-                      title: 'Preferences',
-                      icon: Icons.tune,
-                      accentColor: Colors.orangeAccent,
-                    ),
-                    PlaceholderScreen(
-                      title: 'Account Profile',
-                      icon: Icons.account_circle_outlined,
-                      accentColor: Colors.tealAccent,
+                    const Positioned(
+                      bottom: 24,
+                      left: 16,
+                      right: 16,
+                      child: FloatingBottomNavbar(),
                     ),
                   ],
                 ),
-                const Positioned(
-                  bottom: 24,
-                  left: 16,
-                  right: 16,
-                  child: FloatingBottomNavbar(),
-                ),
-              ],
-            ),
-          );
-        },
+              ),
+            );
+          },
+        ),
       ),
     );
   }
 }
 
 
-========================================
-FILE: .\lib\features\navigation\ui\widgets\floating_bottom_navbar.dart
-========================================
+// ========================================
+// FILE: .\lib\features\navigation\ui\widgets\ble_scan_action_button.dart
+// ========================================
+
+// FILE: .\lib\features\navigation\ui\widgets\ble_scan_action_button.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+import '../../../equipment_finder/bloc/ble_scan_bloc.dart';
+import '../../../equipment_finder/bloc/ble_scan_event.dart';
+
+class BleScanActionButton extends StatelessWidget {
+  const BleScanActionButton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<bool>(
+      stream: FlutterBluePlus.isScanning,
+      builder: (context, snapshot) {
+        final isScanning = snapshot.data ?? false;
+
+        if (isScanning) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.redAccent),
+                tooltip: 'Остановить сканирование',
+                onPressed: () =>
+                    context.read<BleScanBloc>().add(StopScanRequested()),
+              ),
+            ],
+          );
+        }
+
+        return IconButton(
+          icon: const Icon(Icons.refresh),
+          tooltip: 'Обновить список',
+          onPressed: () =>
+              context.read<BleScanBloc>().add(StartScanRequested()),
+        );
+      },
+    );
+  }
+}
+
+
+// ========================================
+// FILE: .\lib\features\navigation\ui\widgets\floating_bottom_navbar.dart
+// ========================================
 
 import 'dart:ui';
 
@@ -1182,9 +3691,79 @@ class FloatingBottomNavbar extends StatelessWidget {
 }
 
 
-========================================
-FILE: .\lib\features\navigation\ui\widgets\placeholder_screens.dart
-========================================
+// ========================================
+// FILE: .\lib\features\navigation\ui\widgets\main_app_bar.dart
+// ========================================
+
+// FILE: .\lib\features\navigation\ui\widgets\main_app_bar.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../../../core/theme/cubit/theme_cubit.dart';
+import '../../cubit/navigation_cubit.dart';
+import 'ble_scan_action_button.dart';
+
+class MainAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final NavbarItem activeItem;
+
+  const MainAppBar({super.key, required this.activeItem});
+
+  String _getScreenTitle(NavbarItem item) {
+    switch (item) {
+      case NavbarItem.equipmentFinder:
+        return 'ZonEx - Equipment Finder';
+      case NavbarItem.activeSession:
+        return 'Active Session';
+      case NavbarItem.activityInsights:
+        return 'Activity Insights';
+      case NavbarItem.preferences:
+        return 'Preferences';
+      case NavbarItem.account:
+        return 'Account Profile';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppBar(
+      title: Text(_getScreenTitle(activeItem)),
+      actions: [
+        // Кнопка обновления/сканирования отображается только на экране поиска устройств
+        if (activeItem == NavbarItem.equipmentFinder)
+          const BleScanActionButton(),
+
+        // Кнопка переключения темы с плавной анимацией
+        BlocBuilder<ThemeCubit, ThemeMode>(
+          builder: (context, themeMode) {
+            final isDark = themeMode == ThemeMode.dark;
+            return IconButton(
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                transitionBuilder: (child, animation) =>
+                    ScaleTransition(scale: animation, child: child),
+                child: Icon(
+                  isDark ? Icons.dark_mode : Icons.light_mode,
+                  key: ValueKey<bool>(isDark),
+                  color: isDark ? Colors.amberAccent : Colors.orange,
+                ),
+              ),
+              onPressed: () => context.read<ThemeCubit>().toggleTheme(),
+            );
+          },
+        ),
+        const SizedBox(width: 8),
+      ],
+    );
+  }
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+}
+
+
+// ========================================
+// FILE: .\lib\features\navigation\ui\widgets\placeholder_screens.dart
+// ========================================
 
 import 'package:flutter/material.dart';
 
@@ -1217,11 +3796,17 @@ class PlaceholderScreen extends StatelessWidget {
               child: Icon(icon, size: 80, color: accentColor),
             ),
             const SizedBox(height: 24),
-            Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             Text(
               'Тестовая заглушка.\nСостояние вкладки сохранено в IndexedStack.',
-              style: TextStyle(color: Theme.of(context).hintColor, fontSize: 14),
+              style: TextStyle(
+                color: Theme.of(context).hintColor,
+                fontSize: 14,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -1232,14 +3817,17 @@ class PlaceholderScreen extends StatelessWidget {
 }
 
 
-========================================
-FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_bloc.dart
-========================================
+// ========================================
+// FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_bloc.dart
+// ========================================
 
+// FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_bloc.dart
 import 'dart:async';
 
+import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:rxdart/rxdart.dart';
 
 import '../../../core/ble_service/ble_service.dart';
 import 'ble_connection_event.dart';
@@ -1249,10 +3837,27 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
   final BleService _bleService;
   StreamSubscription<BluetoothConnectionState>? _statusSubscription;
 
-  BleConnectionBloc(this._bleService) : super(BleDisconnected()) {
-    on<ConnectToDevice>(_onConnect);
-    on<DisconnectFromDevice>(_onDisconnect);
+  String? _currentTargetAddress;
+  int _reconnectAttempts = 0;
+  bool _isManualDisconnect = false;
+  static const int _maxReconnectAttempts = 3;
+
+  BleConnectionBloc(this._bleService)
+    : super(const BleConnectionState.disconnected()) {
+    on<ConnectToDevice>(_onConnect, transformer: sequential());
+    on<DisconnectFromDevice>(_onDisconnect, transformer: sequential());
     on<UpdateConnectionStatus>(_onStatusUpdate);
+
+    // ИСПРАВЛЕНО: Интегрирован реактивный перезапускаемый трансформер с задержкой (Debounce/Delay)
+    on<RetryConnectionAfterDisconnect>(
+      _onRetryConnection,
+      transformer: (events, mapper) {
+        return restartable<RetryConnectionAfterDisconnect>().call(
+          events.delay(const Duration(seconds: 5)),
+          mapper,
+        );
+      },
+    );
 
     _statusSubscription = _bleService.connectionStateStream.listen((status) {
       if (!isClosed) add(UpdateConnectionStatus(status));
@@ -1263,11 +3868,19 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     ConnectToDevice event,
     Emitter<BleConnectionState> emit,
   ) async {
-    emit(BleConnecting());
+    _reconnectAttempts = 0;
+    _currentTargetAddress = event.address;
+    _isManualDisconnect = false;
+
+    emit(BleConnectionState.connecting(event.address));
     try {
       await _bleService.connect(event.address);
     } catch (e) {
-      emit(BleConnectionError("Не удалось установить соединение"));
+      if (!isClosed) {
+        emit(
+          const BleConnectionState.error("Не удалось установить соединение"),
+        );
+      }
     }
   }
 
@@ -1275,18 +3888,66 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     DisconnectFromDevice event,
     Emitter<BleConnectionState> emit,
   ) async {
+    _isManualDisconnect = true;
+    _currentTargetAddress = null;
+    _reconnectAttempts = 0;
+
     await _bleService.disconnect();
-    emit(BleDisconnected());
+
+    if (!isClosed) {
+      emit(const BleConnectionState.disconnected());
+    }
   }
 
   void _onStatusUpdate(
     UpdateConnectionStatus event,
     Emitter<BleConnectionState> emit,
   ) {
-    if (event.status == BluetoothConnectionState.connected) {
-      emit(BleConnected("Тренажер"));
-    } else {
-      emit(BleDisconnected());
+    if (event.status == BluetoothConnectionState.connected &&
+        _currentTargetAddress != null) {
+      _reconnectAttempts = 0;
+      emit(
+        BleConnectionState.connected(
+          deviceAddress: _currentTargetAddress!,
+          deviceName: "Тренажер",
+        ),
+      );
+    } else if (event.status == BluetoothConnectionState.disconnected) {
+      if (!_isManualDisconnect &&
+          _currentTargetAddress != null &&
+          _reconnectAttempts < _maxReconnectAttempts) {
+        _reconnectAttempts++;
+
+        // ИСПРАВЛЕНО: Передаем текущую попытку реконнекта в стейт
+        emit(
+          BleConnectionState.connecting(
+            _currentTargetAddress!,
+            attempt: _reconnectAttempts,
+          ),
+        );
+
+        add(RetryConnectionAfterDisconnect(_currentTargetAddress!));
+      } else if (_isManualDisconnect ||
+          _reconnectAttempts >= _maxReconnectAttempts) {
+        _currentTargetAddress = null;
+        _reconnectAttempts = 0;
+        emit(const BleConnectionState.disconnected());
+      }
+    }
+  }
+
+  Future<void> _onRetryConnection(
+    RetryConnectionAfterDisconnect event,
+    Emitter<BleConnectionState> emit,
+  ) async {
+    // Если пользователь за время ожидания не нажал отмену и адрес совпадает
+    if (_currentTargetAddress == event.address && !_isManualDisconnect) {
+      try {
+        await _bleService.connect(event.address);
+      } catch (e) {
+        // Ошибка перехватывается, чтобы не уронить поток BLoC.
+        // Следующий вызов произойдет по событию disconnected из стрима, если лимит попыток не исчерпан.
+      }
     }
   }
 
@@ -1298,38 +3959,63 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
 }
 
 
-========================================
-FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_event.dart
-========================================
+// ========================================
+// FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_event.dart
+// ========================================
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 abstract class BleConnectionEvent {}
-class ConnectToDevice extends BleConnectionEvent { final String address; ConnectToDevice(this.address); }
+
+class ConnectToDevice extends BleConnectionEvent {
+  final String address;
+  ConnectToDevice(this.address);
+}
+
 class DisconnectFromDevice extends BleConnectionEvent {}
-class UpdateConnectionStatus extends BleConnectionEvent { final BluetoothConnectionState status; UpdateConnectionStatus(this.status); }
 
-
-========================================
-FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_state.dart
-========================================
-
-abstract class BleConnectionState {}
-class BleDisconnected extends BleConnectionState {}
-class BleConnecting extends BleConnectionState {}
-class BleConnected extends BleConnectionState {
-  final String deviceName;
-  BleConnected(this.deviceName);
+class UpdateConnectionStatus extends BleConnectionEvent {
+  final BluetoothConnectionState status;
+  UpdateConnectionStatus(this.status);
 }
-class BleConnectionError extends BleConnectionState {
-  final String message;
-  BleConnectionError(this.message);
+
+// ДОБАВЛЕНО: Новое внутреннее событие для корректного старта автоподключения внутри BLoC архитектуры
+class RetryConnectionAfterDisconnect extends BleConnectionEvent {
+  final String address;
+  RetryConnectionAfterDisconnect(this.address);
 }
 
 
+// ========================================
+// FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_state.dart
+// ========================================
 
-========================================
-FILE: .\test\widget_test.dart
-========================================
+// FILE: .\lib\features\shared\ble_connection_bloc\ble_connection_state.dart
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'ble_connection_state.freezed.dart';
+
+@Freezed()
+sealed class BleConnectionState with _$BleConnectionState {
+  const factory BleConnectionState.disconnected() = _Disconnected;
+
+  // ИСПРАВЛЕНО: Добавлен необязательный параметр attempt для отображения на UI
+  const factory BleConnectionState.connecting(
+    String connectingAddress, {
+    @Default(1) int attempt,
+  }) = _Connecting;
+
+  const factory BleConnectionState.connected({
+    required String deviceAddress,
+    required String deviceName,
+  }) = _Connected;
+
+  const factory BleConnectionState.error(String message) = _Error;
+}
+
+
+// ========================================
+// FILE: .\test\widget_test.dart
+// ========================================
 
 

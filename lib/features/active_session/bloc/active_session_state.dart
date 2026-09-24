@@ -1,26 +1,42 @@
-abstract class ActiveSessionState {}
+// FILE: .\lib\features\active_session\bloc\active_session_state.dart
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-// ДОБАВЛЕНО: Состояние покоя, когда тренировка еще не запущена
-class ActiveSessionInitial extends ActiveSessionState {}
+import '../../../core/ble_parsers/ble_parser.dart'; // Нужен для EquipmentType
 
-// ДОБАВЛЕНО: Состояние активного стриминга очищенных данных тренировки
-class ActiveSessionData extends ActiveSessionState {
-  final double strokeRate; // Частота гребков (SPM)
-  final int strokeCount; // Всего гребков
-  final double distance; // Дистанция (метры)
-  final double power; // Мощность (Ватт)
-  final int heartRate; // Пульс (BPM)
-  final String formattedPace; // Форматированный темп (ММ:СС)
+part 'active_session_state.freezed.dart';
 
-  ActiveSessionData({
-    required this.strokeRate,
-    required this.strokeCount,
-    required this.distance,
-    required this.power,
-    required this.heartRate,
-    required this.formattedPace,
-  });
+@Freezed()
+sealed class ActiveSessionState with _$ActiveSessionState {
+  const factory ActiveSessionState.initial() = _Initial;
+
+  const factory ActiveSessionState.data({
+    @Default(EquipmentType.unknown) EquipmentType equipmentType,
+    @Default('Тренажер') String equipmentName,
+    @Default(0) int heartRate,
+    @Default(0.0) double distance,
+
+    // Метрики гребли (Rower)
+    @Default(0.0) double strokeRate,
+    @Default(0) int strokeCount,
+    @Default('0:00') String formattedPace,
+    @Default(0.0) double rowerPower,
+
+    // Метрики Велосипеда (Bike)
+    @Default(0.0) double bikeSpeed,
+    @Default(0.0) double bikeCadence,
+    @Default(0.0) double bikePower,
+    @Default(0) int resistanceLevel,
+
+    // Метрики Дорожки (Treadmill)
+    @Default(0.0) double runSpeed,
+    @Default('0:00') String runPace,
+    @Default(0.0) double runCadence,
+    @Default(0.0) double incline,
+
+    // Метрики Степпера (Stepper)
+    @Default(0) int floorsCount,
+    @Default(0.0) double stepRate,
+  }) = _Data;
+
+  const factory ActiveSessionState.finished() = _Finished;
 }
-
-// ДОБАВЛЕНО: Состояние завершения сессии
-class ActiveSessionFinished extends ActiveSessionState {}

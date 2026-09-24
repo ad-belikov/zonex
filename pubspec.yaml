@@ -1,7 +1,5 @@
 name: zonex_app
-description: "A new Flutter project."
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
+description: "ZonEx Flutter project"
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 version: 1.0.0+1
@@ -13,8 +11,6 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   flutter_bloc: ^9.1.1
   shared_preferences: ^2.5.5
@@ -27,14 +23,22 @@ dependencies:
   just_audio: ^0.10.6
   get_it: ^9.3.0
   wakelock_plus: ^1.8.0
-  permission_handler: ^13.0.2
+  permission_handler: 11.3.1 # Зафиксировали более раннюю версию
   typed_data: ^1.4.0
+  bloc_concurrency: ^0.3.0
+  rxdart: ^0.28.0
+  freezed: ^4.0.2
+  freezed_annotation: ^3.1.0
+  flutter_foreground_task: ^11.0.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   flutter_lints: ^6.0.0
+  # ДОБАВЛЕНО: Инструменты генерации кода
+  build_runner: ^2.4.15
+
 
 
 # The following section is specific to Flutter packages.

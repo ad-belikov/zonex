@@ -1,26 +1,87 @@
+// FILE: lib/features/active_session/bloc/active_session_bloc.dart
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:rxdart/rxdart.dart';
 
+// Импорты ядра системы
+import '../../../core/background/background_handler.dart';
 import '../../../core/ble_parsers/ble_parser.dart';
 import '../../../core/ble_parsers/ble_parser_factory.dart';
 import '../../../core/ble_parsers/data_smoother.dart';
+import '../../../core/ble_parsers/models/workout_data.dart';
 import '../../../core/ble_service/ble_service.dart';
+import '../../../core/fitness/ftp_calculator.dart'; // Добавлено
+// Импорты текущей фичи
 import 'active_session_event.dart';
 import 'active_session_state.dart';
 
-// ДОБАВЛЕНО: Блок управления состоянием активной тренировки с математической фильтрацией метрик
 class ActiveSessionBloc extends Bloc<ActiveSessionEvent, ActiveSessionState> {
   final BleService _bleService;
+  final FtpCalculator
+  _ftpCalculator; // Зависимость передается через конструктор
+
   StreamSubscription<List<int>>? _rawDataSubscription;
-
-  BleParser? _currentParser;
   DataSmoother? _smoother;
+  BleParser? _currentParser;
 
-  ActiveSessionBloc(this._bleService) : super(ActiveSessionInitial()) {
+  ActiveSessionBloc(this._bleService, this._ftpCalculator)
+    : super(const ActiveSessionState.initial()) {
+    _initForegroundTask(); // Теперь метод гарантированно определен ниже!
     on<StartSession>(_onStartSession);
     on<UpdateRawData>(_onUpdateRawData);
     on<StopSession>(_onStopSession);
+  }
+
+  /// ИСПРАВЛЕНО: Метод инициализации фонового режима возвращен в тело класса
+  void _initForegroundTask() {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'zonex_workout_channel',
+        channelName: 'ZonEx Тренировка',
+        channelDescription: 'Показывает статус активной тренировки в фоне.',
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(5000),
+      ),
+    );
+  }
+
+  Future<void> _startForegroundService(String deviceName) async {
+    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      // Рекомендация по оптимизации батареи
+    }
+
+    await FlutterForegroundTask.startService(
+      notificationTitle: 'ZonEx: Активная тренировка',
+      notificationText: 'Подключено к тренажеру: $deviceName',
+      callback: startCallback,
+    );
+  }
+
+  Future<void> _stopForegroundService() async {
+    if (await FlutterForegroundTask.isRunningService) {
+      await FlutterForegroundTask.stopService();
+    }
+  }
+
+  String _resolveFtmsCharacteristicUuid(String deviceName) {
+    final name = deviceName.toLowerCase();
+    if (name.contains('treadmill') ||
+        name.contains('run') ||
+        name.contains('track')) {
+      return '2acd';
+    } else if (name.contains('row') || name.contains('rower')) {
+      return '2ad1';
+    } else if (name.contains('step') ||
+        name.contains('stair') ||
+        name.contains('climber')) {
+      return '2acf';
+    }
+    return '2ad2';
   }
 
   Future<void> _onStartSession(
@@ -28,72 +89,153 @@ class ActiveSessionBloc extends Bloc<ActiveSessionEvent, ActiveSessionState> {
     Emitter<ActiveSessionState> emit,
   ) async {
     await _rawDataSubscription?.cancel();
+    _rawDataSubscription = null;
 
-    // Пытаемся получить парсер под конкретное устройство (через UUID или имя)
-    // Передаем пустые структуры для базовой инициализации фабрики под FTMS
+    // Сбрасываем старый заезд в калькуляторе при старте новой тренировки
+    _ftpCalculator.resetSession();
+
     _currentParser = BleParserFactory.getParser(
       event.deviceName,
       {},
-      ['1826'], // Принудительно передаем UUID FTMS для StartHouse RS 500
+      ['1826'],
+      targetCharacteristicUuid: _resolveFtmsCharacteristicUuid(
+        event.deviceName,
+      ),
     );
 
     if (_currentParser != null) {
-      // Инициализируем наш математический сглаживатель конфигурацией этого парсера
       _smoother = DataSmoother(_currentParser!.smoothingConfig);
       _smoother?.reset();
     }
 
-    // Подписываемся на поток сырых данных из BLE-сервиса
-    _rawDataSubscription = _bleService.rawDataStream.listen((bytes) {
-      if (!isClosed) add(UpdateRawData(bytes));
-    });
+    await _startForegroundService(event.deviceName);
 
-    // Выставляем начальное пустое состояние тренировки
+    _rawDataSubscription = _bleService.rawDataStream
+        .throttleTime(const Duration(milliseconds: 1000), trailing: true)
+        .listen((bytes) {
+          if (!isClosed) add(UpdateRawData(bytes));
+        });
+
     emit(
-      ActiveSessionData(
-        strokeRate: 0.0,
-        strokeCount: 0,
-        distance: 0.0,
-        power: 0.0,
-        heartRate: 0,
-        formattedPace: '0:00',
+      ActiveSessionState.data(
+        equipmentType: _currentParser?.type ?? EquipmentType.unknown,
+        equipmentName: event.deviceName,
       ),
     );
   }
 
   void _onUpdateRawData(UpdateRawData event, Emitter<ActiveSessionState> emit) {
-    if (_currentParser == null || _smoother == null) return;
+    if (_currentParser == null ||
+        _smoother == null ||
+        isClosed ||
+        emit.isDone) {
+      return;
+    }
 
-    // 1. Десериализация сырых байт в карту параметров
-    final Map<String, dynamic> rawParsed = _currentParser!.parse(event.rawData);
+    try {
+      final WorkoutData parsedWorkoutData = _currentParser!.parse(
+        event.rawData,
+      );
+      final WorkoutData smoothed = _smoother!.smooth(parsedWorkoutData);
 
-    // 2. Пропуск через алгоритмы SMA и EMA сглаживания
-    final Map<String, dynamic> smoothed = _smoother!.smooth(rawParsed);
+      // ИСПРАВЛЕНО: Вместо хрупкого switch-case по скрытым подклассам Freezed,
+      // мы проверяем состояние ошибки через строку toString(). Это на 100% совместимо
+      // с любой версией Freezed и компилируется в строгом режиме strict-casts.
+      final String dataString = smoothed.toString();
+      final bool isError =
+          dataString.contains('errorMessage') || dataString.contains('error');
 
-    if (smoothed.containsKey('error')) return;
+      if (isError) {
+        // Извлекаем сообщение об ошибке, если это необходимо для дебага
+        debugPrint('🚨 Ошибка структуры данных BLE пакета');
+        return;
+      }
 
-    // 3. Извлечение очищенных метрик
-    final double strokeRate = (smoothed['stroke_rate'] ?? 0.0) as double;
-    final int strokeCount = (smoothed['stroke_count'] ?? 0) as int;
-    final double distance = (smoothed['distance'] ?? 0.0) as double;
-    final double power = (smoothed['power'] ?? 0.0) as double;
-    final int heartRate = (smoothed['heart_rate'] ?? 0) as int;
-    final int paceSeconds = (smoothed['pace'] ?? 0) as int;
+      if (emit.isDone) return;
 
-    // 4. ДОБАВЛЕНО: Конвертация темпа из секунд (например, 135) в формат ММ:СС (например, "2:15")
-    final String formattedPace = _formatPace(paceSeconds);
+      // Логируем мощность в калькулятор FTP, если это байк
+      // Приводим к dynamic, чтобы обойти ограничения sealed-интерфейса в строгом режиме
+      final dynamic data = smoothed;
+      final double bikePowerValue = (data.bikePower as num).toDouble();
 
-    // 5. Отправка чистого состояния на UI
-    emit(
-      ActiveSessionData(
-        strokeRate: strokeRate,
-        strokeCount: strokeCount,
-        distance: distance,
-        power: power,
-        heartRate: heartRate,
-        formattedPace: formattedPace,
-      ),
-    );
+      if (_currentParser!.type == EquipmentType.bike && bikePowerValue > 0) {
+        _ftpCalculator.addPowerSample(bikePowerValue);
+      }
+
+      // Принудительно вызываем расчет (обновит SharedPreferences, если тест пройден)
+      _ftpCalculator.calculateCurrentSessionFtp();
+
+      final double distanceValue = (data.distance as num).toDouble();
+      final int heartRateValue = data.heartRate as int;
+
+      String updateText = 'Дистанция: ${distanceValue.round()}м';
+      if (heartRateValue > 0) {
+        updateText += ' | Пульс: $heartRateValue BPM';
+      }
+      FlutterForegroundTask.updateService(notificationText: updateText);
+
+      // Распределяем метрики по типам тренажеров для UI
+      switch (_currentParser!.type) {
+        case EquipmentType.rower:
+          emit(
+            ActiveSessionState.data(
+              equipmentType: EquipmentType.rower,
+              equipmentName: data.equipmentName as String,
+              heartRate: heartRateValue,
+              distance: distanceValue,
+              strokeRate: (data.strokeRate as num).toDouble(),
+              strokeCount: data.strokeCount as int,
+              rowerPower: bikePowerValue,
+              formattedPace: _formatPace(data.splitTime500m as int),
+            ),
+          );
+          break;
+        case EquipmentType.bike:
+          emit(
+            ActiveSessionState.data(
+              equipmentType: EquipmentType.bike,
+              equipmentName: data.equipmentName as String,
+              heartRate: heartRateValue,
+              distance: distanceValue,
+              bikeSpeed: (data.speed as num).toDouble(),
+              bikeCadence: (data.cadence as num).toDouble(),
+              bikePower: bikePowerValue,
+              resistanceLevel: data.resistanceLevel as int,
+            ),
+          );
+          break;
+        case EquipmentType.treadmill:
+          emit(
+            ActiveSessionState.data(
+              equipmentType: EquipmentType.treadmill,
+              equipmentName: data.equipmentName as String,
+              heartRate: heartRateValue,
+              distance: distanceValue,
+              runSpeed: (data.speed as num).toDouble(),
+              runPace: _formatPace(data.runPaceSeconds as int),
+              runCadence: (data.runCadence as num).toDouble(),
+              incline: (data.incline as num).toDouble(),
+            ),
+          );
+          break;
+        case EquipmentType.stepper:
+          emit(
+            ActiveSessionState.data(
+              equipmentType: EquipmentType.stepper,
+              equipmentName: data.equipmentName as String,
+              heartRate: heartRateValue,
+              distance: distanceValue,
+              floorsCount: data.floorsCount as int,
+              stepRate: (data.stepRate as num).toDouble(),
+            ),
+          );
+          break;
+        case EquipmentType.unknown:
+          break;
+      }
+    } catch (e) {
+      debugPrint('🚨 Ошибка в потоке обработки данных BLoC: $e');
+    }
   }
 
   Future<void> _onStopSession(
@@ -101,23 +243,31 @@ class ActiveSessionBloc extends Bloc<ActiveSessionEvent, ActiveSessionState> {
     Emitter<ActiveSessionState> emit,
   ) async {
     await _rawDataSubscription?.cancel();
+    _rawDataSubscription = null;
     _smoother?.reset();
-    emit(ActiveSessionFinished());
+
+    _ftpCalculator.calculateCurrentSessionFtp();
+
+    await _stopForegroundService();
+
+    if (!isClosed && !emit.isDone) {
+      emit(const ActiveSessionState.finished());
+    }
   }
 
-  // ДОБАВЛЕНО: Вспомогательная утилита форматирования времени на 500 метров
   String _formatPace(int totalSeconds) {
     if (totalSeconds <= 0 || totalSeconds > 3600) return '0:00';
     final int minutes = totalSeconds ~/ 60;
     final int seconds = totalSeconds % 60;
-    final String secondsStr = seconds < 10 ? '0$seconds' : '$seconds';
-    return '$minutes:$secondsStr';
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   @override
-  Future<void> close() {
-    _rawDataSubscription?.cancel();
+  Future<void> close() async {
+    await _rawDataSubscription?.cancel();
+    _rawDataSubscription = null;
     _smoother?.reset();
+    await _stopForegroundService();
     return super.close();
   }
 }
